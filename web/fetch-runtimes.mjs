@@ -33,7 +33,9 @@ const RUNTIMES = {
       { url: `${CDN}/pyodide/v0.28.0/full/pyodide.asm.wasm`, required: true },
       { url: `${CDN}/pyodide/v0.28.0/full/python_stdlib.zip`, required: true },
       { url: `${CDN}/pyodide/v0.28.0/full/pyodide-lock.json`, required: true },
-      { url: `${CDN}/npm/pyodide@0.28.0/LICENSE`, save: "LICENSE" },
+      // npm package ships no LICENSE at root — use the GitHub repo copy (same release tag).
+      { url: `${CDN}/gh/pyodide/pyodide@0.28.0/LICENSE`, save: "LICENSE", group: "pylic" },
+      { url: `${CDN}/npm/pyodide@0.28.0/LICENSE`, save: "LICENSE", group: "pylic" },
     ],
   },
   ruby: {
@@ -44,19 +46,20 @@ const RUNTIMES = {
       // Filename varies by release; try candidates, keep whichever exists.
       { url: `${CDN}/npm/@ruby/3.4-wasm-wasi/dist/ruby+stdlib.wasm`, save: "ruby+stdlib.wasm", group: "rubywasm" },
       { url: `${CDN}/npm/@ruby/3.4-wasm-wasi/dist/ruby.wasm`, save: "ruby+stdlib.wasm", group: "rubywasm" },
-      { url: `${CDN}/npm/@ruby/3.4-wasm-wasi/LICENSE`, save: "LICENSE" },
+      { url: `${CDN}/gh/ruby/ruby.wasm@main/LICENSE`, save: "LICENSE", group: "rblic" },
+      { url: `${CDN}/npm/@ruby/3.4-wasm-wasi/LICENSE.txt`, save: "LICENSE", group: "rblic" },
     ],
   },
   postgres: {
-    version: "latest", license: "Apache-2.0",
+    version: "0.5.4", license: "Apache-2.0",
     files: [
-      { url: `${CDN}/npm/@electric-sql/pglite/dist/index.js`, required: true },
+      { url: `${CDN}/npm/@electric-sql/pglite@0.5.4/dist/index.js`, required: true },
       // wasm/data asset names have varied across PGlite releases — candidates:
-      { url: `${CDN}/npm/@electric-sql/pglite/dist/pglite.wasm`, group: "pgwasm" },
-      { url: `${CDN}/npm/@electric-sql/pglite/dist/postgres.wasm`, group: "pgwasm" },
-      { url: `${CDN}/npm/@electric-sql/pglite/dist/pglite.data`, group: "pgdata" },
-      { url: `${CDN}/npm/@electric-sql/pglite/dist/postgres.data`, group: "pgdata" },
-      { url: `${CDN}/npm/@electric-sql/pglite/LICENSE`, save: "LICENSE" },
+      { url: `${CDN}/npm/@electric-sql/pglite@0.5.4/dist/pglite.wasm`, group: "pgwasm" },
+      { url: `${CDN}/npm/@electric-sql/pglite@0.5.4/dist/postgres.wasm`, group: "pgwasm" },
+      { url: `${CDN}/npm/@electric-sql/pglite@0.5.4/dist/pglite.data`, group: "pgdata" },
+      { url: `${CDN}/npm/@electric-sql/pglite@0.5.4/dist/postgres.data`, group: "pgdata" },
+      { url: `${CDN}/npm/@electric-sql/pglite@0.5.4/LICENSE`, save: "LICENSE" },
     ],
   },
 };
