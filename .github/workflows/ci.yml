@@ -69,7 +69,7 @@ jobs:
         with: { php-version: "8.4" }
       - uses: dart-lang/setup-dart@v1
       - uses: mlugg/setup-zig@v1
-        with: { version: "0.14.0" }
+        with: { version: "0.14.1" }   # 0.14.0 hits libSystem link failures on macOS runners
       # C/C++ use the runners' system compilers (gcc/clang preinstalled on
       # ubuntu/macos; Windows runners include MinGW gcc — doctor skips if absent)
       - name: TypeScript
