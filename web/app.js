@@ -217,10 +217,24 @@ async function boot() {
   }
   renderProblemList();
   renderDocs();
+  // Honest versioning: the badge reports the version of THE PAGE YOU ARE
+  // LOOKING AT (embedded in this document at deploy time) — never the
+  // server's. A newer server version renders as an explicit update prompt.
+  const meta = (n) => document.querySelector(`meta[name="${n}"]`)?.content || "dev";
+  const running = { version: meta("glifex-version"), commit: meta("glifex-commit") };
+  $("#offline-badge").textContent = `● offline-ready · v${running.version} (${running.commit})`;
   fetch("version.json", { cache: "no-store" })
     .then((r) => r.json())
-    .then((v) => { $("#offline-badge").textContent = `● offline-ready · v${v.version} (${v.commit})`; })
-    .catch(() => {});   // no version.json (e.g. file:// without build) — badge stays plain
+    .then((v) => {
+      if (v.version !== running.version && running.version !== "dev") {
+        const a = document.createElement("a");
+        a.href = "#"; a.className = "update-available";
+        a.textContent = ` ⟳ v${v.version} available — refresh`;
+        a.onclick = (e) => { e.preventDefault(); location.reload(); };
+        $("#offline-badge").appendChild(a);
+      }
+    })
+    .catch(() => {});   // offline / file:// — badge already shows the truth
   if (state.corpus.problems.length) selectProblem(state.corpus.problems[0].id);
 }
 

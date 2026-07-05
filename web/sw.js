@@ -1,6 +1,6 @@
 // Cache-first service worker: after one visit, the playground works with the
 // network fully severed. Version-bump CACHE on breaking asset changes.
-const CACHE = "glifex-v1";
+const CACHE = "glifex-v2";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "assertions.js", "runtimes.js", "problems.generated.json", "privacy.html", "licenses.html"];
 
 self.addEventListener("install", (e) => {
@@ -13,8 +13,19 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   // version.json must never be cached — it IS the freshness signal.
   if (e.request.url.endsWith("version.json")) return;
-  // Stale-while-revalidate: cache answers instantly (offline guarantee holds),
-  // network refreshes in the background so deploys reach returning visitors.
+  // Navigations are network-first: online visitors always get the newest
+  // page (so the version badge can never be one deploy behind); the cache
+  // answers only when the network can't — where showing the older version,
+  // and SAYING so, is the honest behavior.
+  if (e.request.mode === "navigate") {
+    e.respondWith(fetch(e.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(e.request, copy));
+      return res;
+    }).catch(() => caches.match(e.request).then((hit) => hit || caches.match("index.html"))));
+    return;
+  }
+  // Other assets: stale-while-revalidate (instant + background refresh).
   e.respondWith(caches.match(e.request).then((hit) => {
     const refresh = fetch(e.request).then((res) => {
       if (res && res.ok) {
