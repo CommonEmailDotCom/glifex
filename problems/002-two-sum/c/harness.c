@@ -1,5 +1,5 @@
 /* Generated harness — do not edit. Reads ../test_cases.json, dispatches on variant. */
-#define _POSIX_C_SOURCE 199309L  /* clock_gettime under strict -std=c11 */
+#define _POSIX_C_SOURCE 200809L  /* clock_gettime under strict -std=c11 */
 #include "solution.h"
 #include <time.h>
 

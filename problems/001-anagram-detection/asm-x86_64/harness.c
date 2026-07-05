@@ -2,7 +2,7 @@
  * the narrow C ABI signature the assembly implements:
  *     int <variant>(const char *s, const char *t);   // 1 = anagram
  */
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200809L
 #include "json.h"
 #include <time.h>
 
