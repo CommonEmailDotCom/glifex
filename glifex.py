@@ -136,7 +136,17 @@ def cmd_doctor(args):
 
 
 # ─── test / run / bench (algorithm track) ───────────────────────────
+def _platform_ok(spec: dict) -> bool:
+    want = spec.get("platforms")
+    if not want:
+        return True
+    here = {"linux": "linux", "darwin": "darwin", "win32": "windows"}.get(sys.platform, sys.platform)
+    return here in want
+
+
 def _build_cmd(spec: dict, key: str, variant: str) -> str | None:
+    if sys.platform == "win32" and spec.get(key + "_windows"):
+        key = key + "_windows"
     tpl = spec.get(key)
     if not tpl:
         return None
@@ -161,6 +171,9 @@ def _run_variant(prob: Path, name: str, spec: dict, variant: str, mode: str) -> 
         return True
     if not _arch_ok(spec):
         print(dim(f"  {name}: requires {spec['arch']} (this machine isn't) — skipping"))
+        return True
+    if not _platform_ok(spec):
+        print(dim(f"  {name}: not supported on this OS ({', '.join(spec['platforms'])} only) — skipping"))
         return True
     exe = (spec.get("detect") or "x").split()[0]
     if not shutil.which(exe):

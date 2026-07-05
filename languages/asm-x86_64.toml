@@ -3,6 +3,7 @@ extension = "s"
 practice_file = "practice.s"
 family = "assembly"
 arch = "x86_64"
+platforms = ["linux", "darwin"]   # SysV ABI; Windows x64 uses rcx/rdx — separate plugin someday
 scaffold = false           # added per-problem by hand: needs a per-problem C shim
 detect = "gcc --version"
 install_hint = "gcc assembles .s natively — apt install gcc | brew install gcc | WSL2 on Windows"

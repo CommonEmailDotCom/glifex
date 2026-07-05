@@ -2,7 +2,9 @@
 // x0 = s, x1 = t. Counting table on the stack; returns 1 iff anagram.
     .text
     .globl optimized
+.globl _optimized
 optimized:
+_optimized:
     sub     sp, sp, #1024        // int count[256]
     mov     x8, sp
     mov     x9, #128             // zero as 128 doublewords

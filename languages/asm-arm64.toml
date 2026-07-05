@@ -3,6 +3,7 @@ extension = "s"
 practice_file = "practice.s"
 family = "assembly"
 arch = "aarch64"
+platforms = ["linux", "darwin"]
 scaffold = false
 detect = "gcc --version"
 install_hint = "gcc assembles .s natively on ARM64 hosts (Apple Silicon, RPi, Graviton)"
