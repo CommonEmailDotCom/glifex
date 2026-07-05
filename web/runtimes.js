@@ -82,8 +82,12 @@ const Runtimes = (() => {
   async function loadRuby() {
     if (!(await vendored("ruby"))) return null;
     await script("vendor/ruby/browser.script.iife.js");
-    const { DefaultRubyVM } = window["ruby-wasm-wasi"];
-    const res = await fetch("vendor/ruby/ruby.wasm");
+    // Global name has varied across @ruby/wasm-wasi releases — try candidates.
+    const rubyNS = window["ruby-wasm-wasi"] || window["ruby.wasm"] || window.RubyWasm || window["@ruby/wasm-wasi"];
+    if (!rubyNS) throw new Error("ruby.wasm loaded but exposed no known global");
+    const { DefaultRubyVM } = rubyNS;
+    // stdlib build required: the harness does `require "json"`.
+    const res = await fetch("vendor/ruby/ruby+stdlib.wasm");
     const mod = await WebAssembly.compileStreaming(res);
     const { vm } = await DefaultRubyVM(mod);
     return {
@@ -118,7 +122,9 @@ const Runtimes = (() => {
   async function get(lang) {
     if (lang === "javascript") return "native";        // no runtime needed
     if (!(lang in cache)) {
-      cache[lang] = LOADERS[lang] ? LOADERS[lang]().catch(() => null) : Promise.resolve(null);
+      cache[lang] = LOADERS[lang]
+        ? LOADERS[lang]().catch((e) => { console.error(`[glifex] ${lang} runtime failed to load:`, e); return null; })
+        : Promise.resolve(null);
     }
     return cache[lang];
   }
