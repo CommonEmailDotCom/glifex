@@ -77,3 +77,4 @@ test-results/
 node_modules/
 glifex_bin.exe
 web/version.json
+.glifex.wasm

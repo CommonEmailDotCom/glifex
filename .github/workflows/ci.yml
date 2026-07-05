@@ -74,6 +74,12 @@ jobs:
       # ubuntu/macos; Windows runners include MinGW gcc — doctor skips if absent)
       - name: TypeScript
         run: npm install -g typescript
+      - name: WABT (WebAssembly Text toolchain)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then sudo apt-get update -qq && sudo apt-get install -y wabt; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install wabt; fi
+          # Windows: wabt not installed — wat skips honestly on that leg
       - name: Toolchain report
         run: python3 glifex.py doctor || python glifex.py doctor
         shell: bash
