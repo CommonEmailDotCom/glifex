@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glifex — polyglot practice playground</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header>
+  <div class="brand">glifex<span>.dev</span></div>
+  <nav>
+    <button data-view="play" class="active">Playground</button>
+    <button data-view="docs">Docs</button>
+  </nav>
+  <div class="status" id="offline-badge" title="Runs fully offline">● offline-ready</div>
+</header>
+
+<main>
+  <!-- Playground -->
+  <section id="view-play" class="view active">
+    <aside class="problems">
+      <h2>Problems</h2>
+      <ul id="problem-list"></ul>
+    </aside>
+
+    <div class="workspace">
+      <div class="problem-head">
+        <h1 id="problem-title">Loading…</h1>
+        <div class="controls">
+          <label>Language
+            <select id="lang-select"></select>
+          </label>
+          <button id="reveal-btn" class="ghost" title="Show reference solution">Reveal</button>
+          <button id="run-btn" class="primary">▶ Run tests</button>
+        </div>
+      </div>
+
+      <div id="statement" class="statement"></div>
+
+      <div class="editor-wrap">
+        <div class="editor-label" id="editor-label">practice</div>
+        <textarea id="editor" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+
+      <div class="preview-wrap" id="preview-wrap" hidden>
+        <div class="editor-label">live preview</div>
+        <iframe id="preview" sandbox="allow-same-origin" title="Live preview"></iframe>
+      </div>
+
+      <div class="results" id="results">
+        <div class="hint">Write your <code>solve()</code> and press Run. JavaScript executes
+        natively in your browser — no download, works offline. Other languages need a
+        one-time runtime fetch (see Docs).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Docs -->
+  <section id="view-docs" class="view">
+    <article id="docs-body" class="docs"></article>
+  </section>
+</main>
+
+<script src="assertions.js"></script>
+<script src="runtimes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

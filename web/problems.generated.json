@@ -1,0 +1,232 @@
+{
+  "generatedAt": "2026-07-05T04:18:43.742Z",
+  "problems": [
+    {
+      "id": "001-anagram-detection",
+      "track": "algorithm",
+      "title": "001 · Anagram Detection",
+      "statement": "# 001 · Anagram Detection\n\n## Task\nGiven two strings `s` and `t`, return `true` if `t` is an anagram of `s`\n(same characters, same counts), else `false`.\n\n## Signature\n`solve(input) -> bool`  where `input = { \"s\": string, \"t\": string }`\n\n## Notes\nThis is a *worked example*: `practice.*` ships with a correct naive solution so\n`glifex test 001 <lang>` is green on a fresh clone. Compare it against the hidden\nreferences with `glifex reveal 001 <lang> optimized`. New problems created with\n`glifex new` start from blank stubs instead.\n",
+      "cases": [
+        {
+          "input": {
+            "s": "clinteastwood",
+            "t": "oldwestaction"
+          },
+          "expected": true
+        },
+        {
+          "input": {
+            "s": "hello",
+            "t": "world"
+          },
+          "expected": false
+        },
+        {
+          "input": {
+            "s": "",
+            "t": ""
+          },
+          "expected": true
+        },
+        {
+          "input": {
+            "s": "a",
+            "t": "ab"
+          },
+          "expected": false
+        }
+      ],
+      "languages": {
+        "csharp": {
+          "practice": "using System;\nusing System.Linq;\nusing System.Collections.Generic;\nclass Practice : ISolution {\n    public object Solve(Dictionary<string, object> c) {\n        var s = c[\"s\"].ToString().OrderBy(x => x);\n        var t = c[\"t\"].ToString().OrderBy(x => x);\n        return s.SequenceEqual(t);\n    }\n}\n",
+          "clean": "using System;\nusing System.Linq;\nusing System.Collections.Generic;\nclass Clean : ISolution {\n    public object Solve(Dictionary<string, object> c) {\n        return c[\"s\"].ToString().OrderBy(x => x).SequenceEqual(c[\"t\"].ToString().OrderBy(x => x));\n    }\n}\n",
+          "optimized": "using System;\nusing System.Collections.Generic;\nclass Optimized : ISolution {\n    public object Solve(Dictionary<string, object> c) {\n        string s = c[\"s\"].ToString(), t = c[\"t\"].ToString();\n        if (s.Length != t.Length) return false;\n        var count = new Dictionary<char, int>();\n        foreach (var ch in s) count[ch] = count.GetValueOrDefault(ch) + 1;\n        foreach (var ch in t) {\n            if (!count.ContainsKey(ch) || count[ch] == 0) return false;\n            count[ch]--;\n        }\n        return true;\n    }\n}\n"
+        },
+        "go": {
+          "practice": "package main\n\nimport \"sort\"\n\nfunc sortStr(s string) string {\n\tr := []rune(s)\n\tsort.Slice(r, func(i, j int) bool { return r[i] < r[j] })\n\treturn string(r)\n}\n\nfunc practice(c map[string]any) any {\n\treturn sortStr(c[\"s\"].(string)) == sortStr(c[\"t\"].(string))\n}\n",
+          "clean": "package main\n\nfunc clean(c map[string]any) any {\n\treturn sortStr(c[\"s\"].(string)) == sortStr(c[\"t\"].(string))\n}\n",
+          "optimized": "package main\n\nfunc optimized(c map[string]any) any {\n\ts, t := c[\"s\"].(string), c[\"t\"].(string)\n\tif len(s) != len(t) {\n\t\treturn false\n\t}\n\tcount := map[rune]int{}\n\tfor _, ch := range s {\n\t\tcount[ch]++\n\t}\n\tfor _, ch := range t {\n\t\tcount[ch]--\n\t\tif count[ch] < 0 {\n\t\t\treturn false\n\t\t}\n\t}\n\treturn true\n}\n"
+        },
+        "java": {
+          "practice": "import java.util.*;\npublic class Practice implements Solution {\n    public Object solve(Map<String, Object> c) {\n        char[] a = ((String) c.get(\"s\")).toCharArray();\n        char[] b = ((String) c.get(\"t\")).toCharArray();\n        Arrays.sort(a); Arrays.sort(b);\n        return Arrays.equals(a, b);\n    }\n}\n",
+          "clean": "import java.util.*;\npublic class Clean implements Solution {\n    public Object solve(Map<String, Object> c) {\n        char[] a = ((String) c.get(\"s\")).toCharArray();\n        char[] b = ((String) c.get(\"t\")).toCharArray();\n        Arrays.sort(a); Arrays.sort(b);\n        return Arrays.equals(a, b);\n    }\n}\n",
+          "optimized": "import java.util.*;\npublic class Optimized implements Solution {\n    public Object solve(Map<String, Object> c) {\n        String s = (String) c.get(\"s\"), t = (String) c.get(\"t\");\n        if (s.length() != t.length()) return false;\n        int[] count = new int[128];\n        for (char ch : s.toCharArray()) count[ch]++;\n        for (char ch : t.toCharArray()) if (--count[ch] < 0) return false;\n        return true;\n    }\n}\n"
+        },
+        "javascript": {
+          "practice": "module.exports = function solve(c) {\n  return [...c.s].sort().join(\"\") === [...c.t].sort().join(\"\");\n};\n",
+          "clean": "module.exports = function solve(c) {\n  return [...c.s].sort().join(\"\") === [...c.t].sort().join(\"\");\n};\n",
+          "optimized": "module.exports = function solve(c) {\n  if (c.s.length !== c.t.length) return false;\n  const count = {};\n  for (const ch of c.s) count[ch] = (count[ch] || 0) + 1;\n  for (const ch of c.t) { if (!count[ch]) return false; count[ch]--; }\n  return true;\n};\n"
+        },
+        "python": {
+          "practice": "def solve(case):\n    return sorted(case[\"s\"]) == sorted(case[\"t\"])\n",
+          "clean": "def solve(case):\n    return sorted(case[\"s\"]) == sorted(case[\"t\"])\n",
+          "optimized": "from collections import Counter\ndef solve(case):\n    return Counter(case[\"s\"]) == Counter(case[\"t\"])\n"
+        },
+        "ruby": {
+          "practice": "def solve(c)\n  c[\"s\"].chars.sort == c[\"t\"].chars.sort\nend\n",
+          "clean": "def solve(c)\n  c[\"s\"].chars.sort == c[\"t\"].chars.sort\nend\n",
+          "optimized": "def solve(c)\n  c[\"s\"].chars.tally == c[\"t\"].chars.tally\nend\n"
+        },
+        "typescript": {
+          "practice": "export function solve(c: any): boolean {\n  return [...c.s].sort().join(\"\") === [...c.t].sort().join(\"\");\n}\n",
+          "clean": "export function solve(c: any): boolean {\n  return [...c.s].sort().join(\"\") === [...c.t].sort().join(\"\");\n}\n",
+          "optimized": "export function solve(c: any): boolean {\n  if (c.s.length !== c.t.length) return false;\n  const count: Record<string, number> = {};\n  for (const ch of c.s) count[ch] = (count[ch] || 0) + 1;\n  for (const ch of c.t) { if (!count[ch]) return false; count[ch]--; }\n  return true;\n}\n"
+        }
+      }
+    },
+    {
+      "id": "002-two-sum",
+      "track": "algorithm",
+      "title": "002 · Two Sum",
+      "statement": "# 002 · Two Sum\n\n## Task\nGiven `nums` and a `target`, return the indices `[i, j]` (i < j) of the two\nnumbers adding to `target`. Exactly one solution exists.\n\n## Signature\n`solve(input) -> [int, int]`  where `input = { \"nums\": int[], \"target\": int }`\n",
+      "cases": [
+        {
+          "input": {
+            "nums": [
+              2,
+              7,
+              11,
+              15
+            ],
+            "target": 9
+          },
+          "expected": [
+            0,
+            1
+          ]
+        },
+        {
+          "input": {
+            "nums": [
+              3,
+              2,
+              4
+            ],
+            "target": 6
+          },
+          "expected": [
+            1,
+            2
+          ]
+        },
+        {
+          "input": {
+            "nums": [
+              3,
+              3
+            ],
+            "target": 6
+          },
+          "expected": [
+            0,
+            1
+          ]
+        }
+      ],
+      "languages": {
+        "csharp": {
+          "practice": "using System.Collections.Generic;\nclass Practice : ISolution {\n    public object Solve(Dictionary<string,object> c) {\n        throw new System.NotImplementedException();\n    }\n}\n",
+          "clean": "using System.Collections.Generic;\nclass Clean : ISolution {\n    public object Solve(Dictionary<string,object> c) {\n        throw new System.NotImplementedException();\n    }\n}\n",
+          "optimized": "using System.Collections.Generic;\nclass Optimized : ISolution {\n    public object Solve(Dictionary<string,object> c) {\n        throw new System.NotImplementedException();\n    }\n}\n"
+        },
+        "go": {
+          "practice": "package main\n\nfunc practice(c map[string]any) any {\n\t// TODO: implement\n\tpanic(\"not implemented\")\n}\n",
+          "clean": "package main\n\nfunc clean(c map[string]any) any {\n\t// TODO: implement\n\tpanic(\"not implemented\")\n}\n",
+          "optimized": "package main\n\nfunc optimized(c map[string]any) any {\n\t// TODO: implement\n\tpanic(\"not implemented\")\n}\n"
+        },
+        "java": {
+          "practice": "import java.util.*;\npublic class Practice implements Solution {\n    public Object solve(Map<String,Object> c) {\n        throw new RuntimeException(\"not implemented\");\n    }\n}\n",
+          "clean": "import java.util.*;\npublic class Clean implements Solution {\n    public Object solve(Map<String,Object> c) {\n        throw new RuntimeException(\"not implemented\");\n    }\n}\n",
+          "optimized": "import java.util.*;\npublic class Optimized implements Solution {\n    public Object solve(Map<String,Object> c) {\n        throw new RuntimeException(\"not implemented\");\n    }\n}\n"
+        },
+        "javascript": {
+          "practice": "module.exports = function solve(c) {\n  const seen = {};\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (need in seen) return [seen[need], i];\n    seen[c.nums[i]] = i;\n  }\n  return null;\n};\n",
+          "clean": "module.exports = function solve(c) {\n  // TODO: implement\n  throw new Error('not implemented');\n};\n",
+          "optimized": "module.exports = function solve(c) {\n  // TODO: implement\n  throw new Error('not implemented');\n};\n"
+        },
+        "python": {
+          "practice": "def solve(case):\n    seen = {}\n    for i, n in enumerate(case[\"nums\"]):\n        if case[\"target\"] - n in seen:\n            return [seen[case[\"target\"] - n], i]\n        seen[n] = i\n    return None\n",
+          "clean": "def solve(case):\n    # TODO: implement\n    raise NotImplementedError\n",
+          "optimized": "def solve(case):\n    # TODO: implement\n    raise NotImplementedError\n"
+        },
+        "ruby": {
+          "practice": "def solve(c)\n  # TODO: implement\n  raise 'not implemented'\nend\n",
+          "clean": "def solve(c)\n  # TODO: implement\n  raise 'not implemented'\nend\n",
+          "optimized": "def solve(c)\n  # TODO: implement\n  raise 'not implemented'\nend\n"
+        },
+        "typescript": {
+          "practice": "export function solve(c: any): number[] | null {\n  const seen: Record<number, number> = {};\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (need in seen) return [seen[need], i];\n    seen[c.nums[i]] = i;\n  }\n  return null;\n}\n",
+          "clean": "export function solve(c: any): any {\n  // TODO: implement\n  throw new Error('not implemented');\n}\n",
+          "optimized": "export function solve(c: any): any {\n  // TODO: implement\n  throw new Error('not implemented');\n}\n"
+        }
+      }
+    },
+    {
+      "id": "001-users-with-no-orders",
+      "track": "database",
+      "title": "DB 001 · Users With No Orders",
+      "statement": "# DB 001 · Users With No Orders\n\n## Task\nReturn the `name` of every user who has never placed an order.\n\n## Order matters\nNo — the harness compares row sets order-independently unless a problem says otherwise.\n\n## Engines\nRuns offline on SQLite (`glifex db test 001`) and on Postgres when hosted.\nThe schema is dialect-neutral so both engines accept it.\n",
+      "schema": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\nCREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, total REAL);\nCREATE INDEX idx_orders_user ON orders(user_id);\n",
+      "seed": "INSERT INTO users (id, name) VALUES (1,'Ada'), (2,'Bjarne'), (3,'Grace'), (4,'Linus');\nINSERT INTO orders (id, user_id, total) VALUES (1,1,42.0), (2,1,10.0), (3,3,99.0);\n",
+      "expected": {
+        "ordered": false,
+        "rows": [
+          [
+            "Bjarne"
+          ],
+          [
+            "Linus"
+          ]
+        ]
+      },
+      "practice": "SELECT u.name\nFROM users u\nLEFT JOIN orders o ON o.user_id = u.id\nWHERE o.id IS NULL;\n",
+      "solutions": {
+        "clean": "SELECT name FROM users\nWHERE id NOT IN (SELECT user_id FROM orders);\n",
+        "optimized": "-- Anti-join; with an index on orders(user_id) the planner avoids a full scan.\nSELECT u.name\nFROM users u\nWHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id);\n"
+      }
+    },
+    {
+      "id": "001-card-layout",
+      "track": "frontend",
+      "title": "FE 001 · Three-Card Flex Row",
+      "statement": "# FE 001 · Three-Card Flex Row\n\n## Task\nBuild a horizontal row of exactly three cards inside a flex container.\n\nRequirements (each is an automated assertion):\n1. A `<section class=\"cards\">` container exists and is `display: flex`.\n2. It contains exactly **three** elements with class `card`.\n3. Each card contains an `<h2>` title.\n4. The container has a `gap` of at least `8px`.\n\n## How it's checked\nThe playground renders your markup live and evaluates `assertions.json`\nagainst the real DOM and computed styles — no pixel-diffing, so results are\ndeterministic across browsers.\n",
+      "starter": "<!-- Build the three-card flex row described in the problem. -->\n<style>\n  /* your CSS here */\n</style>\n\n<!-- your markup here -->\n",
+      "assertions": [
+        {
+          "type": "exists",
+          "selector": "section.cards",
+          "label": "a <section class=\"cards\"> container exists"
+        },
+        {
+          "type": "style",
+          "selector": "section.cards",
+          "property": "display",
+          "equals": "flex",
+          "label": "the container is display: flex"
+        },
+        {
+          "type": "count",
+          "selector": "section.cards > .card",
+          "equals": 3,
+          "label": "exactly three .card children"
+        },
+        {
+          "type": "count",
+          "selector": ".card h2",
+          "equals": 3,
+          "label": "every card has an <h2> title"
+        },
+        {
+          "type": "style",
+          "selector": "section.cards",
+          "property": "gap",
+          "minPx": 8,
+          "label": "container gap is at least 8px"
+        }
+      ],
+      "solutions": {
+        "clean": "<style>\n  .cards { display: flex; gap: 16px; }\n  .card { border: 1px solid #ccc; border-radius: 8px; padding: 12px; flex: 1; }\n</style>\n<section class=\"cards\">\n  <div class=\"card\"><h2>Alpha</h2><p>First card.</p></div>\n  <div class=\"card\"><h2>Beta</h2><p>Second card.</p></div>\n  <div class=\"card\"><h2>Gamma</h2><p>Third card.</p></div>\n</section>\n"
+      }
+    }
+  ]
+}

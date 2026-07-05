@@ -1,0 +1,6 @@
+[
+  { "input": { "s": "clinteastwood", "t": "oldwestaction" }, "expected": true },
+  { "input": { "s": "hello",         "t": "world"         }, "expected": false },
+  { "input": { "s": "",              "t": ""              }, "expected": true },
+  { "input": { "s": "a",             "t": "ab"            }, "expected": false }
+]
