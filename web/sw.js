@@ -11,9 +11,18 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))));
 });
 self.addEventListener("fetch", (e) => {
-  e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
-    const copy = res.clone();
-    caches.open(CACHE).then((c) => c.put(e.request, copy));
-    return res;
-  })));
+  // version.json must never be cached — it IS the freshness signal.
+  if (e.request.url.endsWith("version.json")) return;
+  // Stale-while-revalidate: cache answers instantly (offline guarantee holds),
+  // network refreshes in the background so deploys reach returning visitors.
+  e.respondWith(caches.match(e.request).then((hit) => {
+    const refresh = fetch(e.request).then((res) => {
+      if (res && res.ok) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+      }
+      return res;
+    }).catch(() => hit);
+    return hit || refresh;
+  }));
 });

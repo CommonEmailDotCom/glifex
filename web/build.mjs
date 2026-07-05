@@ -57,3 +57,12 @@ function feProblems() {
 const corpus = { generatedAt: new Date().toISOString(), problems: [...algoProblems(), ...dbProblems(), ...feProblems()] };
 writeFileSync(join(dirname(fileURLToPath(import.meta.url)), "problems.generated.json"), JSON.stringify(corpus, null, 2));
 console.log(`baked ${corpus.problems.length} problems -> web/problems.generated.json`);
+
+// Build-time version stamp: every deploy gets a fresh version, no commits needed.
+const now = new Date();
+const pad = (n) => String(n).padStart(2, "0");
+const version = `${now.getUTCFullYear()}.${pad(now.getUTCMonth() + 1)}.${pad(now.getUTCDate())}-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}`;
+const commit = (process.env.GITHUB_SHA || "local").slice(0, 7);
+writeFileSync(join(dirname(fileURLToPath(import.meta.url)), "version.json"),
+  JSON.stringify({ version, commit, builtAt: now.toISOString() }, null, 2));
+console.log(`version ${version} (${commit}) -> web/version.json`);

@@ -217,6 +217,10 @@ async function boot() {
   }
   renderProblemList();
   renderDocs();
+  fetch("version.json", { cache: "no-store" })
+    .then((r) => r.json())
+    .then((v) => { $("#offline-badge").textContent = `● offline-ready · v${v.version} (${v.commit})`; })
+    .catch(() => {});   // no version.json (e.g. file:// without build) — badge stays plain
   if (state.corpus.problems.length) selectProblem(state.corpus.problems[0].id);
 }
 
