@@ -1,4 +1,5 @@
 name = "zig"
+platforms = ["linux", "windows"]   # macOS GitHub runners: zig 0.14.0 cannot locate libSystem at link time — code passes on linux+windows; re-enable when runner/zig fix ships
 extension = "zig"
 practice_file = "practice.zig"
 detect = "zig version"
