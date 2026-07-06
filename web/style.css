@@ -126,3 +126,9 @@ button.ghost.active { color: var(--accent); border-color: var(--accent); }
    min-height:0 on the chain, or flex refuses to shrink it → clipping. */
 .reference-panel { display: flex; flex-direction: column; max-height: 40vh; flex: 0 0 auto; }
 #reference-code { flex: 1 1 auto; min-height: 0; overflow: auto; }
+
+/* My display:flex on .reference-panel overrode the browser's [hidden]
+   rule, making the panel un-hideable (toggle "worked once", and
+   syncReference read hidden=true on a visibly-open panel). Author-level
+   re-assertion restores the hidden attribute's authority. */
+.reference-panel[hidden] { display: none; }
