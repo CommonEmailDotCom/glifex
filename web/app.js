@@ -131,7 +131,15 @@ function loadEditor() {
     saveDraft(starter);
     $("#editor-label").textContent = "practice";
   };
-  $("#reference-panel").hidden = true;
+  syncReference();
+}
+
+function syncReference() {
+  // The reference panel must always show the CURRENT problem+language.
+  // Open panel + context change -> re-render in place. If the new context
+  // has no reference for this variant, showReference says so honestly.
+  const panel = $("#reference-panel");
+  if (!panel.hidden) showReference(state.refVariant || "optimized");
 }
 
 function showReference(variant) {
@@ -318,7 +326,7 @@ async function boot() {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
   document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => switchView(b.dataset.view)));
-  $("#lang-select").onchange = (e) => { state.lang = e.target.value; loadEditor(); };
+  $("#lang-select").onchange = (e) => { state.lang = e.target.value; loadEditor(); syncReference(); };
   $("#reveal-btn").onclick = () => {
     const panel = $("#reference-panel");
     panel.hidden = !panel.hidden;
