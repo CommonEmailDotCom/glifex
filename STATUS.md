@@ -54,6 +54,33 @@ records the shipped set. First-contact lessons encoded:
   false "isn't vendored"; the vendored-check uses `no-cache` so a fossilized
   pre-vendor 404 can never mask a present runtime.
 
+## ✅ Playground v2 — verified in production (desktop + Android)
+
+- **Local persistence** (localStorage, schema `glifex-progress-v1`): drafts
+  autosave (500ms debounce), survive reloads ("draft restored · reset to
+  starter"), keyed per track × problem × language (cross-language isolation
+  verified). Merge semantics unit-tested in Node (11 tests): newest code wins,
+  solved OR'd, attempts maxed, best time minned, hostile imports normalize.
+- **Export / Import**: progress downloads as a JSON file the user owns; import
+  merges. privacy.html's local-first promise, implemented and verified.
+- **Draft-safe reveal**: side panel, clean/optimized tabs, explicit
+  Reveal/Hide toggle (label = state, single writer), re-renders on
+  language/problem switch; the editor is never touched.
+- **CodeMirror 5.65.18** (vendored, MIT, in notices): highlighting, line
+  numbers, dark theme, Ctrl/Cmd+Enter; mirrors into the original textarea;
+  plain-textarea fallback if unvendored.
+- **Post-run timing**: adaptive repetition (≥5ms window) because
+  performance.now()'s ~0.1ms grain read fast JS as 0; median sample; labeled
+  coarse; "compare vs optimized" runs the reference in the same runtime.
+- **E2E**: 20/20 across Chromium + Firefox, including draft-survives-reload
+  and the full reveal toggle cycle as contracts.
+- Lessons: author `display` silently defeats the `[hidden]` attribute —
+  re-assert `[hidden]{display:none}`; SWR serves each asset one-generation
+  stale INDEPENDENTLY, so HTML/CSS/JS can skew during rapid deploys
+  (follow-up: version-stamped asset URLs); runtime-injected CSS beats
+  style.css on load order — win by specificity; batches must gate on
+  `node --check`, not just report it.
+
 ## ✅ Tracks & infrastructure
 
 - **Database track** — `db test` (ephemeral SQLite) and `db bench`
