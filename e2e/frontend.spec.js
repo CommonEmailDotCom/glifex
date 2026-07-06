@@ -6,8 +6,13 @@ const { test, expect } = require("@playwright/test");
 test("frontend problem: clean solution passes all assertions", async ({ page }) => {
   await page.goto("/");
   await page.locator('#problem-list li:has-text("Card")').click();
-  // reveal loads the clean reference into the editor
+  // v2 reveal is a draft-safe side panel — it never touches the editor.
+  // To run the reference, copy it from the panel into the editor explicitly
+  // (which also exercises the panel + tab switching end-to-end).
   await page.locator("#reveal-btn").click();
+  await page.locator("#ref-clean").click();
+  const reference = await page.locator("#reference-code").textContent();
+  await page.locator("#editor").fill(reference);
   await page.locator("#run-btn").click();
   await expect(page.locator(".summary")).toHaveClass(/ok/);
 });
