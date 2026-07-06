@@ -324,9 +324,20 @@ def cmd_verify(args):
     ORDER = ["O(1)", "O(log n)", "O(sqrt(n))", "O(n)", "O(n log n)", "O(n^2)", "O(n^3)", "O(2^n)", "O(n!)"]
 
     probs = sorted((root / "problems").iterdir())
-    prob = next((p for p in probs if p.is_dir() and (p.name == args.problem or p.name.startswith(args.problem + "-") or p.name.split("-")[0] == args.problem)), None)
+    prob = next(
+        (
+            p
+            for p in probs
+            if p.is_dir()
+            and (
+                p.name == args.problem or p.name.startswith(args.problem + "-") or p.name.split("-")[0] == args.problem
+            )
+        ),
+        None,
+    )
     if not prob:
-        print(f"no such problem: {args.problem}"); _sys.exit(2)
+        print(f"no such problem: {args.problem}")
+        _sys.exit(2)
 
     registry = {}
     for f in sorted((root / "languages").glob("*.toml")):
@@ -336,7 +347,8 @@ def cmd_verify(args):
     errors, warnings = [], []
     mf = prob / "manifest.toml"
     if not mf.exists():
-        print(f"x {prob.name}: manifest.toml missing (see docs/contribution-policy.md)"); _sys.exit(1)
+        print(f"x {prob.name}: manifest.toml missing (see docs/contribution-policy.md)")
+        _sys.exit(1)
     man = tomllib.loads(mf.read_text(encoding="utf-8"))
     declared = man.get("languages", {})
     excluded = man.get("exclusions", {})
@@ -358,10 +370,12 @@ def cmd_verify(args):
 
     for lang, info in declared.items():
         if lang not in registry:
-            errors.append(f"declared language '{lang}' is not in the registry"); continue
+            errors.append(f"declared language '{lang}' is not in the registry")
+            continue
         d = prob / lang
         if not d.is_dir():
-            errors.append(f"declared language '{lang}' has no {lang}/ directory"); continue
+            errors.append(f"declared language '{lang}' has no {lang}/ directory")
+            continue
         for v in info.get("variants", []):
             f = d / variant_file(lang, v)
             if not f.exists():
@@ -369,7 +383,8 @@ def cmd_verify(args):
         for v in [x for x in info.get("variants", []) if x in ("practice", "clean", "optimized")]:
             c = (comp.get(lang, {}) or {}).get(v) or (comp.get("default", {}) or {}).get(v)
             if not c:
-                errors.append(f"{lang}/{v}: complexity missing (worst-case time+space required)"); continue
+                errors.append(f"{lang}/{v}: complexity missing (worst-case time+space required)")
+                continue
             for field in ("time", "space"):
                 if c.get(field) not in ORDER:
                     errors.append(f"{lang}/{v}: complexity {field}='{c.get(field)}' not in the whitelist {ORDER}")
@@ -377,6 +392,7 @@ def cmd_verify(args):
         def _t(v, lang=lang):
             c = (comp.get(lang, {}) or {}).get(v) or (comp.get("default", {}) or {}).get(v) or {}
             return ORDER.index(c["time"]) if c.get("time") in ORDER else None
+
         tp, to = _t("practice"), _t("optimized")
         if tp is not None and to is not None and to > tp:
             errors.append(f"{lang}: optimized time is WORSE than practice - the problem's premise is broken")
@@ -396,24 +412,28 @@ def cmd_verify(args):
     for e in errors:
         print(f"  x {e}")
     if errors:
-        print(f"\n{prob.name}: manifest FAILED ({len(errors)} error(s))"); _sys.exit(1)
+        print(f"\n{prob.name}: manifest FAILED ({len(errors)} error(s))")
+        _sys.exit(1)
     print(f"  + manifest consistent: {len(declared)} languages declared, {len(excluded)} excluded")
 
     if getattr(args, "static", False):
-        print(f"{prob.name}: verify (static) PASSED"); return
+        print(f"{prob.name}: verify (static) PASSED")
+        return
 
     failed = []
     for lang in declared:
         for v in ("clean", "optimized"):
             if v not in declared[lang].get("variants", []):
                 continue
-            r = subprocess.run([_sys.executable, str(root / "glifex.py"), "test", prob.name, lang, v],
-                               capture_output=True, text=True)
+            r = subprocess.run(
+                [_sys.executable, str(root / "glifex.py"), "test", prob.name, lang, v], capture_output=True, text=True
+            )
             if r.returncode != 0:
                 failed.append(f"{lang}/{v}")
                 print(f"  x reference run failed: {lang} {v}")
     if failed:
-        print(f"\n{prob.name}: verify FAILED - broken references: {', '.join(failed)}"); _sys.exit(1)
+        print(f"\n{prob.name}: verify FAILED - broken references: {', '.join(failed)}")
+        _sys.exit(1)
     print(f"{prob.name}: verify PASSED (references green on every installed toolchain)")
 
 
@@ -524,7 +544,10 @@ def main():
     rv.add_argument("variant", nargs="?")
     rv.set_defaults(fn=cmd_reveal)
     sub.add_parser("doctor").set_defaults(fn=cmd_doctor)
-    vf = sub.add_parser("verify"); vf.add_argument("problem"); vf.add_argument("--static", action="store_true"); vf.set_defaults(fn=cmd_verify)
+    vf = sub.add_parser("verify")
+    vf.add_argument("problem")
+    vf.add_argument("--static", action="store_true")
+    vf.set_defaults(fn=cmd_verify)
 
     db = sub.add_parser("db")
     dbsub = db.add_subparsers(dest="dbcmd", required=True)
