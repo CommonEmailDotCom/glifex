@@ -84,7 +84,7 @@ const Runtimes = (() => {
   // ── Ruby: ruby.wasm ──────────────────────────────────────────────────
   async function loadRuby() {
     if (!(await vendored("ruby"))) return null;
-    await script("vendor/ruby/browser.script.iife.js");
+    await script("vendor/ruby/browser.umd.js");   // API flavor: exposes DefaultRubyVM
     // Global name varies across releases — probe every window key for an
     // object exposing DefaultRubyVM (name-proof).
     const rubyNS = ["ruby-wasm-wasi", "ruby.wasm", "RubyWasm", ...Object.keys(window)]

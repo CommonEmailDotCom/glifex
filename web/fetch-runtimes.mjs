@@ -41,7 +41,10 @@ const RUNTIMES = {
   ruby: {
     version: "3.4", license: "Ruby / BSD-2-Clause",
     files: [
-      { url: `${CDN}/npm/@ruby/3.4-wasm-wasi/dist/browser.script.iife.js`, required: true },
+      // API library (DefaultRubyVM) lives in @ruby/wasm-wasi — the
+      // 3.4-wasm-wasi package's iife script is the auto-run flavor (no API).
+      { url: `${CDN}/npm/@ruby/wasm-wasi/dist/browser.umd.js`, save: "browser.umd.js", group: "rbapi" },
+      { url: `${CDN}/npm/@ruby/wasm-wasi/dist/browser/index.umd.js`, save: "browser.umd.js", group: "rbapi" },
       // The harness does `require "json"` — we need the STDLIB build.
       // Filename varies by release; try candidates, keep whichever exists.
       { url: `${CDN}/npm/@ruby/3.4-wasm-wasi/dist/ruby+stdlib.wasm`, save: "ruby+stdlib.wasm", group: "rubywasm" },
@@ -111,7 +114,7 @@ for (const [lang, spec] of Object.entries(RUNTIMES)) {
   while (queue.length) {
     const file = queue.shift();
     const text = await readFile(join(dir, file), "utf8").catch(() => "");
-    for (const m of text.matchAll(/chunk-[A-Za-z0-9_-]+\.js/g)) {
+    for (const m of text.matchAll(/[A-Za-z0-9_-]+\.(?:wasm|data)|chunk-[A-Za-z0-9_-]+\.js/g)) {
       const chunk = m[0];
       if (have.has(chunk)) continue;
       have.add(chunk);
@@ -121,8 +124,10 @@ for (const [lang, spec] of Object.entries(RUNTIMES)) {
         console.log(`  ✓ postgres: ${chunk} (${(r.bytes / 1024).toFixed(0)} KB) [auto-discovered]`);
         queue.push(chunk);
       } catch (e) {
-        console.log(`  ✗ postgres: ${chunk} ${e.message} [auto-discovered — REQUIRED]`);
-        failed = true;
+        // js chunks are required; wasm/data hits may be regex false positives
+        const hard = chunk.endsWith(".js");
+        console.log(`  ✗ postgres: ${chunk} ${e.message} [auto-discovered${hard ? " — REQUIRED" : ", tolerated"}]`);
+        if (hard) failed = true;
       }
     }
   }
