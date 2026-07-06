@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-06T04:58:50.795Z",
+  "generatedAt": "2026-07-06T05:01:54.370Z",
   "problems": [
     {
       "id": "001-anagram-detection",
@@ -141,13 +141,13 @@
         },
         "javascript": {
           "practice": "module.exports = function solve(c) {\n  const seen = {};\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (need in seen) return [seen[need], i];\n    seen[c.nums[i]] = i;\n  }\n  return null;\n};\n",
-          "clean": "module.exports = function solve(c) {\n  // TODO: implement\n  throw new Error('not implemented');\n};\n",
-          "optimized": "module.exports = function solve(c) {\n  // TODO: implement\n  throw new Error('not implemented');\n};\n"
+          "clean": "module.exports = function solve(c) {\n  const seen = new Map();\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (seen.has(need)) return [seen.get(need), i];\n    seen.set(c.nums[i], i);\n  }\n  return [];\n};\n",
+          "optimized": "module.exports = function solve(c) {\n  const seen = new Map();\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (seen.has(need)) return [seen.get(need), i];\n    seen.set(c.nums[i], i);\n  }\n  return [];\n};\n"
         },
         "python": {
           "practice": "def solve(case):\n    seen = {}\n    for i, n in enumerate(case[\"nums\"]):\n        if case[\"target\"] - n in seen:\n            return [seen[case[\"target\"] - n], i]\n        seen[n] = i\n    return None\n",
-          "clean": "def solve(case):\n    # TODO: implement\n    raise NotImplementedError\n",
-          "optimized": "def solve(case):\n    # TODO: implement\n    raise NotImplementedError\n"
+          "clean": "def solve(c):\n    seen = {}\n    for i, n in enumerate(c[\"nums\"]):\n        if c[\"target\"] - n in seen:\n            return [seen[c[\"target\"] - n], i]\n        seen[n] = i\n    return []\n",
+          "optimized": "def solve(c):\n    seen = {}\n    for i, n in enumerate(c[\"nums\"]):\n        if c[\"target\"] - n in seen:\n            return [seen[c[\"target\"] - n], i]\n        seen[n] = i\n    return []\n"
         },
         "ruby": {
           "practice": "def solve(c)\n  seen = {}\n  c[\"nums\"].each_with_index do |n, i|\n    need = c[\"target\"] - n\n    return [seen[need], i] if seen.key?(need)\n    seen[n] = i\n  end\n  []\nend\n",
@@ -156,8 +156,8 @@
         },
         "typescript": {
           "practice": "export function solve(c: any): number[] | null {\n  const seen: Record<number, number> = {};\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (need in seen) return [seen[need], i];\n    seen[c.nums[i]] = i;\n  }\n  return null;\n}\n",
-          "clean": "export function solve(c: any): any {\n  // TODO: implement\n  throw new Error('not implemented');\n}\n",
-          "optimized": "export function solve(c: any): any {\n  // TODO: implement\n  throw new Error('not implemented');\n}\n"
+          "clean": "export function solve(c: { nums: number[]; target: number }): number[] {\n  const seen = new Map<number, number>();\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (seen.has(need)) return [seen.get(need)!, i];\n    seen.set(c.nums[i], i);\n  }\n  return [];\n}\n",
+          "optimized": "export function solve(c: { nums: number[]; target: number }): number[] {\n  const seen = new Map<number, number>();\n  for (let i = 0; i < c.nums.length; i++) {\n    const need = c.target - c.nums[i];\n    if (seen.has(need)) return [seen.get(need)!, i];\n    seen.set(c.nums[i], i);\n  }\n  return [];\n}\n"
         }
       }
     },
