@@ -84,14 +84,16 @@ const Runtimes = (() => {
   // ── Ruby: ruby.wasm ──────────────────────────────────────────────────
   async function loadRuby() {
     if (!(await vendored("ruby"))) return null;
-    await script("vendor/ruby/browser.umd.js");   // API flavor: exposes DefaultRubyVM
-    // Global name varies across releases — probe every window key for an
-    // object exposing DefaultRubyVM (name-proof).
-    const rubyNS = ["ruby-wasm-wasi", "ruby.wasm", "RubyWasm", ...Object.keys(window)]
-      .map((k) => { try { return window[k]; } catch { return null; } })
-      .find((v) => v && typeof v === "object" && "DefaultRubyVM" in v);
-    if (!rubyNS) throw new Error("ruby script loaded but no global exposes DefaultRubyVM — run the grep in the session notes");
-    const { DefaultRubyVM } = rubyNS;
+    // Deterministic UMD capture: the wrapper's first branch is
+    // `typeof exports === 'object' -> factory(exports)`, so evaluating the
+    // file with an explicit exports object hands us the API directly — no
+    // global-name roulette, identical behavior on every device (the
+    // window-probe approach failed on Android while passing on desktop).
+    const src = await (await fetch("vendor/ruby/browser.umd.js", { cache: "no-cache" })).text();
+    const exportsObj = {};
+    new Function("exports", "module", src)(exportsObj, { exports: exportsObj });
+    const { DefaultRubyVM } = exportsObj;
+    if (!DefaultRubyVM) throw new Error("ruby umd evaluated but exported no DefaultRubyVM");
     // stdlib build required: the harness does `require "json"`.
     const res = await fetch("vendor/ruby/ruby+stdlib.wasm");
     const mod = await WebAssembly.compileStreaming(res);
