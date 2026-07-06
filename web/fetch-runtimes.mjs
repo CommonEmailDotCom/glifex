@@ -99,6 +99,35 @@ for (const [lang, spec] of Object.entries(RUNTIMES)) {
     JSON.stringify({ lang, version: spec.version, license: spec.license, files: got, fetchedAt: new Date().toISOString() }, null, 2));
   summary[lang] = { version: spec.version, license: spec.license, files: got.map((f) => f.name) };
 }
+// PGlite's index.js is a multi-chunk ESM bundle; chunk names are content
+// hashes that change per release. Discover and fetch them by scanning the
+// JS we already downloaded, to a fixpoint (chunks can import chunks).
+{
+  const { readFile, readdir } = await import("node:fs/promises");
+  const dir = join(VENDOR, "postgres");
+  const base = RUNTIMES.postgres.files[0].url.replace(/index\.js$/, "");
+  const have = new Set(await readdir(dir));
+  let queue = ["index.js"];
+  while (queue.length) {
+    const file = queue.shift();
+    const text = await readFile(join(dir, file), "utf8").catch(() => "");
+    for (const m of text.matchAll(/chunk-[A-Za-z0-9_-]+\.js/g)) {
+      const chunk = m[0];
+      if (have.has(chunk)) continue;
+      have.add(chunk);
+      try {
+        const r = await fetchTo(base + chunk, dir);
+        summary.postgres.files.push(r.name);
+        console.log(`  ✓ postgres: ${chunk} (${(r.bytes / 1024).toFixed(0)} KB) [auto-discovered]`);
+        queue.push(chunk);
+      } catch (e) {
+        console.log(`  ✗ postgres: ${chunk} ${e.message} [auto-discovered — REQUIRED]`);
+        failed = true;
+      }
+    }
+  }
+}
+
 await writeFile(join(VENDOR, "VERSIONS.json"), JSON.stringify(summary, null, 2));
 console.log(`\n${failed ? "INCOMPLETE — see ✗ lines above" : "Done"}. web/vendor/VERSIONS.json records what shipped (use it to amend THIRD_PARTY_NOTICES.md).`);
 process.exit(failed ? 1 : 0);

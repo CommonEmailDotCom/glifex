@@ -125,6 +125,11 @@ async function run() {
   if (p.track === "database") {
     const db = await window.Runtimes.get("postgres");
     if (!db) {
+      const err = window.Runtimes.error("postgres");
+      if (err) {
+        res.innerHTML = `<div class="summary bad">In-browser Postgres failed to start: ${err} — details in the console (F12).</div>`;
+        return;
+      }
       res.innerHTML = `<div class="needs-runtime">The in-browser Postgres (PGlite) isn't vendored yet:
         run <code>node web/fetch-runtimes.mjs</code> once. Offline without it, use the CLI:
         <code>glifex db test ${p.id}</code>.</div>`;
@@ -152,6 +157,11 @@ async function run() {
   }
   const runner = await window.Runtimes.get(state.lang);
   if (!runner || runner === "native") {
+    const err = window.Runtimes.error(state.lang);
+    if (err) {
+      res.innerHTML = `<div class="summary bad">The ${state.lang} runtime failed to start: ${err} — details in the console (F12).</div>`;
+      return;
+    }
     res.innerHTML = `<div class="needs-runtime">The <b>${state.lang}</b> runtime isn't vendored.
       JavaScript runs with zero setup. Python, TypeScript, and Ruby run in-browser once the
       site operator vendors their runtimes (<code>node web/fetch-runtimes.mjs</code>).

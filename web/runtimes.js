@@ -10,6 +10,7 @@
 
 const Runtimes = (() => {
   const cache = {};          // lang -> Promise<runner|null>
+  const loadErrors = {};     // lang -> error message (loader threw)
   const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
   function script(src) {
@@ -84,9 +85,12 @@ const Runtimes = (() => {
   async function loadRuby() {
     if (!(await vendored("ruby"))) return null;
     await script("vendor/ruby/browser.script.iife.js");
-    // Global name has varied across @ruby/wasm-wasi releases — try candidates.
-    const rubyNS = window["ruby-wasm-wasi"] || window["ruby.wasm"] || window.RubyWasm || window["@ruby/wasm-wasi"];
-    if (!rubyNS) throw new Error("ruby.wasm loaded but exposed no known global");
+    // Global name varies across releases — probe every window key for an
+    // object exposing DefaultRubyVM (name-proof).
+    const rubyNS = ["ruby-wasm-wasi", "ruby.wasm", "RubyWasm", ...Object.keys(window)]
+      .map((k) => { try { return window[k]; } catch { return null; } })
+      .find((v) => v && typeof v === "object" && "DefaultRubyVM" in v);
+    if (!rubyNS) throw new Error("ruby script loaded but no global exposes DefaultRubyVM — run the grep in the session notes");
     const { DefaultRubyVM } = rubyNS;
     // stdlib build required: the harness does `require "json"`.
     const res = await fetch("vendor/ruby/ruby+stdlib.wasm");
@@ -125,12 +129,16 @@ const Runtimes = (() => {
     if (lang === "javascript") return "native";        // no runtime needed
     if (!(lang in cache)) {
       cache[lang] = LOADERS[lang]
-        ? LOADERS[lang]().catch((e) => { console.error(`[glifex] ${lang} runtime failed to load:`, e); return null; })
+        ? LOADERS[lang]().catch((e) => {
+            console.error(`[glifex] ${lang} runtime failed to load:`, e);
+            loadErrors[lang] = String(e.message || e);
+            return null;
+          })
         : Promise.resolve(null);
     }
     return cache[lang];
   }
 
-  return { get, has: async (lang) => (await get(lang)) !== null };
+  return { get, has: async (lang) => (await get(lang)) !== null, error: (lang) => loadErrors[lang] };
 })();
 if (typeof window !== "undefined") window.Runtimes = Runtimes;
