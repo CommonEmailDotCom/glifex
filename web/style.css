@@ -96,3 +96,33 @@ button.ghost.active { color: var(--accent); border-color: var(--accent); }
 .CodeMirror-gutters { background: var(--panel); border-right: 1px solid var(--line); }
 .CodeMirror-linenumber { color: var(--muted); }
 .CodeMirror-cursor { border-left: 1px solid var(--fg); }
+
+/* ── v2 layering fixes ─────────────────────────────────────────────── */
+/* CM's stylesheet loads AFTER style.css (injected at editor init), so its
+   stock white theme was winning on load order. Doubling the class beats it
+   on specificity regardless of order. */
+.CodeMirror.cm-s-default {
+  background: var(--panel-2); color: var(--fg);
+}
+.cm-s-default .CodeMirror-gutters { background: var(--panel); border-right: 1px solid var(--line); }
+.cm-s-default .CodeMirror-linenumber { color: var(--muted); }
+.cm-s-default .CodeMirror-cursor { border-left: 1px solid var(--fg); }
+.cm-s-default .CodeMirror-selected { background: rgba(110, 168, 254, .18); }
+/* dark token palette (CM default palette assumes a white page) */
+.cm-s-default .cm-keyword  { color: var(--accent); }
+.cm-s-default .cm-string, .cm-s-default .cm-string-2 { color: var(--accent-2); }
+.cm-s-default .cm-number, .cm-s-default .cm-atom { color: #f2cc60; }
+.cm-s-default .cm-comment  { color: var(--muted); font-style: italic; }
+.cm-s-default .cm-def, .cm-s-default .cm-variable-2, .cm-s-default .cm-property { color: #d2a8ff; }
+.cm-s-default .cm-operator, .cm-s-default .cm-variable, .cm-s-default .cm-bracket { color: var(--fg); }
+.cm-s-default .cm-tag { color: var(--accent); }
+.cm-s-default .cm-attribute { color: #f2cc60; }
+
+/* CM's editor div is inserted after the label in the DOM and was painting
+   over it — the "draft restored" chip wasn't cleared, it was covered. */
+.editor-label { z-index: 7; }
+
+/* Flexbox gotcha: an overflow:auto child inside a flex column needs
+   min-height:0 on the chain, or flex refuses to shrink it → clipping. */
+.reference-panel { display: flex; flex-direction: column; max-height: 40vh; flex: 0 0 auto; }
+#reference-code { flex: 1 1 auto; min-height: 0; overflow: auto; }
