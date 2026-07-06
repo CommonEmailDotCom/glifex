@@ -327,11 +327,15 @@ async function boot() {
   }
   document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => switchView(b.dataset.view)));
   $("#lang-select").onchange = (e) => { state.lang = e.target.value; loadEditor(); syncReference(); };
-  $("#reveal-btn").onclick = () => {
+  function setRevealVisible(show) {
+    // Single writer for the panel: visibility, button label, and content
+    // move together — the label IS the state, so they can't disagree.
     const panel = $("#reference-panel");
-    panel.hidden = !panel.hidden;
-    if (!panel.hidden) showReference(state.refVariant || "optimized");
-  };
+    panel.hidden = !show;
+    $("#reveal-btn").textContent = show ? "Hide" : "Reveal";
+    if (show) showReference(state.refVariant || "optimized");
+  }
+  $("#reveal-btn").onclick = () => setRevealVisible($("#reference-panel").hidden);
   $("#ref-clean").onclick = () => showReference("clean");
   $("#ref-optimized").onclick = () => showReference("optimized");
   $("#run-btn").onclick = run;

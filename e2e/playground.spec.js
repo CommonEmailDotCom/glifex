@@ -52,13 +52,19 @@ test("OFFLINE: the playground still runs after the network is cut", async ({ pag
   await context.setOffline(false);
 });
 
-test("reveal opens a side reference panel without touching the editor", async ({ page }) => {
+test("reveal toggles open/closed with an honest label, never touching the editor", async ({ page }) => {
   await page.goto("/");
   await page.locator("#editor").fill("// my precious draft");
   await page.locator("#reveal-btn").click();
   await expect(page.locator("#reference-panel")).toBeVisible();
+  await expect(page.locator("#reveal-btn")).toHaveText("Hide");
   await expect(page.locator("#reference-code")).not.toBeEmpty();
-  await expect(page.locator("#editor")).toHaveValue("// my precious draft");   // draft-safe
+  await page.locator("#reveal-btn").click();                       // toggle CLOSED
+  await expect(page.locator("#reference-panel")).toBeHidden();
+  await expect(page.locator("#reveal-btn")).toHaveText("Reveal");
+  await page.locator("#reveal-btn").click();                       // and OPEN again
+  await expect(page.locator("#reference-panel")).toBeVisible();
+  await expect(page.locator("#editor")).toHaveValue("// my precious draft");   // draft-safe throughout
 });
 
 test("a typed draft survives a full page reload", async ({ page }) => {
