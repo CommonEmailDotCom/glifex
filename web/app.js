@@ -16,25 +16,33 @@ function runJavaScript(source, cases) {
   } catch (e) {
     return { error: `Compile error: ${e.message}` };
   }
+  // Correctness pass (recorded once)…
   const results = [];
-  const times = [];
-  for (let rep = 0; rep < 5; rep++) {
-    const t0 = performance.now();
-    for (let i = 0; i < cases.length; i++) {
-      try {
-        const got = solve(cases[i].input);
-        if (rep === 0) {
-          const ok = JSON.stringify(got) === JSON.stringify(cases[i].expected);
-          results.push({ i, ok, got, expected: cases[i].expected });
-        }
-      } catch (e) {
-        if (rep === 0) results.push({ i, ok: false, error: e.message, expected: cases[i].expected });
-      }
+  for (let i = 0; i < cases.length; i++) {
+    try {
+      const got = solve(cases[i].input);
+      const ok = JSON.stringify(got) === JSON.stringify(cases[i].expected);
+      results.push({ i, ok, got, expected: cases[i].expected });
+    } catch (e) {
+      results.push({ i, ok: false, error: e.message, expected: cases[i].expected });
     }
-    times.push(((performance.now() - t0) * 1e6) / Math.max(1, cases.length));
-    if (results.some((r) => !r.ok)) break;   // don't bench broken code
   }
-  const nsPerCase = times.sort((a, b) => a - b)[Math.floor(times.length / 2)];
+  // …then timing. performance.now() is coarsened to ~0.1ms, and fast solutions
+  // finish all cases in microseconds — so adaptively repeat the whole case set
+  // until one sample fills a measurable window, then take a median of 3.
+  let nsPerCase = 0;
+  if (results.every((r) => r.ok) && cases.length) {
+    let iters = 1;
+    const sample = () => {
+      const t0 = performance.now();
+      for (let k = 0; k < iters; k++) for (const c of cases) solve(c.input);
+      return performance.now() - t0;
+    };
+    let dt = sample();
+    while (dt < 5 && iters < 65536) { iters *= 2; dt = sample(); }
+    const samples = [dt, sample(), sample()].sort((a, b) => a - b);
+    nsPerCase = (samples[1] * 1e6) / (iters * cases.length);
+  }
   return { results, nsPerCase };
 }
 

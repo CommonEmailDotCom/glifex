@@ -43,7 +43,20 @@ const Runtimes = (() => {
         results.push({ i, ok: false, error: String(e.message || e), expected: cases[i].expected });
       }
     }
-    const nsPerCase = cases.length ? ((performance.now() - t0) * 1e6) / cases.length : 0;
+    let nsPerCase = cases.length ? ((performance.now() - t0) * 1e6) / cases.length : 0;
+    // Fast runtimes (e.g. transpiled TS) can finish under the ~0.1ms clock
+    // grain and read 0 — adaptively repeat until measurable (capped: WASM
+    // per-case marshaling makes unbounded repeats expensive).
+    if (nsPerCase === 0 && results.every((r) => r.ok) && cases.length) {
+      let iters = 2, dt = 0;
+      while (dt < 5 && iters <= 4096) {
+        const s = performance.now();
+        for (let k = 0; k < iters; k++) for (const c of cases) { try { callSolve(c.input); } catch {} }
+        dt = performance.now() - s;
+        if (dt < 5) iters *= 2;
+      }
+      if (dt > 0) nsPerCase = (dt * 1e6) / (iters * cases.length);
+    }
     return { results, nsPerCase };
   }
 
