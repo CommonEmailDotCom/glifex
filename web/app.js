@@ -301,3 +301,33 @@ module.exports = function solve(input) {
 };</code></pre>
     <p>Full docs, the CLI, and the plugin system live in the repository README.</p>`;
 }
+
+// Reference panel: one-tap copy + contained select-all.
+// The pre is a plain element, so a document-level Ctrl/Cmd+A would select the
+// whole page; when focus is inside the panel we select just the code instead.
+(function () {
+  const pre = document.getElementById("reference-code");
+  const btn = document.getElementById("ref-copy");
+  if (btn) btn.onclick = async () => {
+    const text = pre ? pre.textContent : "";
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) { // clipboard API can be denied; fall back to selecting for manual copy
+      selectPre(); return;
+    }
+    const was = btn.textContent; btn.textContent = "copied!";
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  };
+  function selectPre() {
+    if (!pre) return;
+    const r = document.createRange(); r.selectNodeContents(pre);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  }
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+      const panel = document.getElementById("reference-panel");
+      if (panel && !panel.hidden && panel.contains(document.activeElement)) {
+        e.preventDefault(); selectPre();
+      }
+    }
+  });
+})();
