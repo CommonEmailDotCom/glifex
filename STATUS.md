@@ -154,6 +154,42 @@ constraint, gaining C++20 + exceptions + atomic `shared_ptr` (and possibly retir
 custom memfs for a standard WASI FS). Runtime is manifest-driven (`web/vendor/cpp/manifest.json`),
 so this is a toolchain swap, not a rewrite.
 
+## Retro track: 6502 (Bx-4) + SM83 / Game Boy (Bx-5) -- live in production
+
+Both ship on the same proven template: customasm.wasm assembles PLAIN mnemonics
+in-browser (the loader prepends a vendored std ruledef + an origin bankdef), and a
+first-party, sandbox-tested CPU core executes them. Result contract: inputs at a
+fixed RAM address, 16-bit little-endian result, halt instruction stops the run.
+Metric is instruction count (coarse) -- see TODO(cycle-accuracy) in the loaders.
+
+- **6502**: entry $0600, n at $10, result $12/$13, BRK halts. Core: `web/retro/cpu6502.mjs`
+  (documented opcodes; SED throws -- decimal mode fails loud, not silently wrong).
+- **SM83**: entry $0100, n at $C000, result $C010/$C011, HALT stops. Core:
+  `web/retro/cpuSm83.mjs` (full ruledef-emittable set incl. all CB-prefix ops + DAA).
+  Vendored ruledef is PATCHED (upstream `ADD HL,r16` bug -- see docs/UPSTREAM-NOTES.md).
+- 003 carries practice/clean/optimized for both; dropdown shows display names
+  (`display` key in `languages/*.toml`, baked into the corpus as `displayNames`).
+- Guards: `web/corpus-integrity.test.mjs` (declared+runnable language must be baked --
+  catches build.mjs ext-map drops), data-driven dropdown e2e, plain-mnemonic smoke e2es.
+- Next core (#3) needs a sourced/authored ruledef (crate only ships 6502 + sm83) and
+  picks up the RETRO-CONTRACT work (docs/RETRO-CONTRACT.md). Tom Harte validation of
+  both cores is deferred until offloaded compute exists (vector sets are millions of cases).
+
+## Operational: fork + minutes diet + never-stale (July 2026)
+
+- Development moved temporarily to the CommonEmailDotCom/glifex fork (free-tier
+  Actions/Codespaces exhausted on the main account). Codespaces docs remain valid;
+  current flow is local (Termux) + push. Site: commonemaildotcom.github.io/glifex/.
+- CI diet: the 3-OS test matrix, security job, retro-smoke and codeql triggers are
+  TEMP-disabled (grep `TEMP(free-tier)` to re-enable by deleting marked lines).
+  Kept spine: lint -> corpus (staleness + integrity) -> playground -> e2e + pages.
+- Vendor resilience: `actions/cache` on web/vendor (separate pages/ci keys -- the
+  e2e flavor strips CodeMirror) + curl retries; deploys stop touching third-party
+  CDNs after one good run (ends the get.wasmer.io / Binji 429 class).
+- Never-stale: SW navigations + corpus fetch with cache:"no-cache" (the browser
+  HTTP cache made "network-first" up to 10 min stale); update detection runs at
+  boot / tab refocus / every 5 min and lights the header refresh button.
+
 ## Verify everything
 
 ```bash
