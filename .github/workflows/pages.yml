@@ -18,33 +18,44 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v6
         with: { node-version: "24" }
+      - name: Restore vendored runtimes cache (production, keeps CodeMirror)
+        uses: actions/cache@v4
+        with:
+          path: web/vendor
+          key: vendor-v1-pages-${{ hashFiles('web/fetch-runtimes.mjs') }}
       - name: Vendor WASM runtimes
-        run: node web/fetch-runtimes.mjs
+        run: |
+          if [ -f web/vendor/.vendor-complete ]; then echo "vendor cache hit -- skipping"; exit 0; fi
+          ok=0; for i in 1 2 3; do node web/fetch-runtimes.mjs && { ok=1; break; }; echo "fetch-runtimes attempt $i failed; retrying in 20s"; sleep 20; done; [ "$ok" = 1 ]
       - name: Vendor C toolchain (@wasmer/sdk + clang.webc)
         run: |
+          if [ -f web/vendor/.vendor-complete ]; then echo "vendor cache hit -- skipping"; exit 0; fi
           mkdir -p web/vendor/c
           VER=0.8.0-beta.1
           npm pack @wasmer/sdk@${VER}
           tar xzf wasmer-sdk-*.tgz
           cp -r package/dist/. web/vendor/c/
           rm -rf package wasmer-sdk-*.tgz
-          curl https://get.wasmer.io -sSfL | sh
+          curl --retry 5 --retry-delay 15 --retry-all-errors https://get.wasmer.io -sSfL | sh
           export PATH="$HOME/.wasmer/bin:$PATH"
-          wasmer package download clang/clang -o web/vendor/c/clang.webc
+          ok=0; for i in 1 2 3 4 5; do wasmer package download clang/clang -o web/vendor/c/clang.webc && { ok=1; break; }; echo "wasmer download attempt $i failed; retrying in 15s"; sleep 15; done; [ "$ok" = 1 ]
           echo '{"runtime":"c","via":"wasmer"}' > web/vendor/c/manifest.json
           ls -la web/vendor/c
       - name: Vendor C++ toolchain (Binji wasm-clang)
         run: |
+          if [ -f web/vendor/.vendor-complete ]; then echo "vendor cache hit -- skipping"; exit 0; fi
           mkdir -p web/vendor/cpp
           BASE=https://raw.githubusercontent.com/binji/wasm-clang/master
           for f in clang lld memfs sysroot.tar shared.js worker.js; do
-            curl -fsSL "$BASE/$f" -o "web/vendor/cpp/$f"
+            curl -fsSL --retry 5 --retry-delay 15 --retry-all-errors "$BASE/$f" -o "web/vendor/cpp/$f"
           done
           sed -i 's/if (this.buffer.byteLength === 0) {/if (this.buffer !== this.memory.buffer || this.buffer.byteLength === 0) {/' web/vendor/cpp/shared.js
           grep -q 'this.buffer !== this.memory.buffer' web/vendor/cpp/shared.js || { echo 'shared.js check() patch failed'; exit 1; }
           echo '{"runtime":"cpp","via":"binji-wasm-clang","clang":"8.0.1","std":"c++17"}' > web/vendor/cpp/manifest.json
           ls -la web/vendor/cpp
           test "$(stat -c%s web/vendor/cpp/clang)" -gt 1000000 || { echo "clang too small (LFS pointer?)"; exit 1; }
+      - name: Mark vendor complete (cached for future runs)
+        run: touch web/vendor/.vendor-complete
       - run: node web/build.mjs
       - name: Stamp document version (badge reports the page it lives in)
         run: |
