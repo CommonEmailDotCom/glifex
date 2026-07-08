@@ -45,7 +45,8 @@ function selectProblem(id) {
     + (p.tags || []).map((t) => `<span class="tag">${t}</span>`).join("");
   $("#statement").innerHTML = renderMarkdown(p.statement.replace(/^#.*\n/, ""));
   const sel = $("#lang-select");
-  sel.innerHTML = langs.map((l) => `<option value="${l}">${l}</option>`).join("");
+  const dn = (state.corpus && state.corpus.displayNames) || {};
+  sel.innerHTML = langs.map((l) => `<option value="${l}">${dn[l] || l}</option>`).join("");
   sel.value = state.lang;
   loadEditor();
   $("#preview-wrap").hidden = p.track !== "frontend";
