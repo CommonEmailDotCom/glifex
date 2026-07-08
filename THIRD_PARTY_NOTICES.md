@@ -23,3 +23,17 @@ enabled via `node web/fetch-runtimes.mjs`.
 Each project's full license text ships alongside its vendored files under
 `web/vendor/<name>/` once distributed. Nothing else on glifex.dev embeds
 third-party runtime code; the site's own HTML/CSS/JS is original and MIT.
+
+## Repo-only test fixtures (not deployed)
+
+The 8080 CPU diagnostic ROMs under `web/retro/test-roms/8080/` are third-party
+test data executed only by the local/CI test harness and excluded from the
+site deploy: TST8080 (Microcosm Associates 1980, regarded public domain),
+8080PRE and 8080EXM (Bartholomew/Cringle, **GPLv3**, sources included), and
+CPUTEST (SuperSoft Associates 1981, abandonware, no formal license). Full
+provenance, links, and reference cycle totals: `web/retro/test-roms/8080/README.md`.
+The GPLv3 fixtures do not affect the MIT licensing of Glifex's own code: they
+are neither linked against nor distributed with the product. The
+`web/retro/8080.ruledef.asm` instruction table is first-party (MIT), authored
+from the Intel 8080 User's Manual, unlike the upstream customasm std ruledefs
+listed above.
