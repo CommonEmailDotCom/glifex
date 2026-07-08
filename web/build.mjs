@@ -12,6 +12,21 @@ const read = (p) => (existsSync(p) ? readFileSync(p, "utf8") : null);
 // playground can badge problems. Targeted extraction — the manifests are
 // template-authored and `glifex verify` enforces their structure, so a full
 // TOML parser is overkill for two single-occurrence keys.
+// Display names for language IDs, read from languages/*.toml ("display" key).
+// Baked into the corpus so the UI can label the dropdown properly.
+const displayNames = (() => {
+  const out = {};
+  const ldir = join(ROOT, "languages");
+  if (existsSync(ldir)) for (const f of readdirSync(ldir)) {
+    if (!f.endsWith(".toml")) continue;
+    const t = read(join(ldir, f)) || "";
+    const id = t.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+    const d = t.match(/^display\s*=\s*"([^"]+)"/m)?.[1];
+    if (id && d) out[id] = d;
+  }
+  return out;
+})();
+
 const manifestMeta = (dir) => {
   const t = read(join(dir, "manifest.toml"));
   if (!t) return { difficulty: null, tags: [] };
@@ -30,7 +45,7 @@ function algoProblems() {
     const languages = {};
     for (const lang of readdirSync(dir)) {
       const ld = join(dir, lang);
-      const ext = { python: "py", javascript: "js", typescript: "ts", go: "go", java: "java", ruby: "rb", csharp: "cs", wat: "wat", php: "php", c: "c", cpp: "cpp", "asm-6502": "s" }[lang];
+      const ext = { python: "py", javascript: "js", typescript: "ts", go: "go", java: "java", ruby: "rb", csharp: "cs", wat: "wat", php: "php", c: "c", cpp: "cpp", "asm-6502": "s", sm83: "s" }[lang];
       if (!ext) continue;
       const cap = lang === "java" || lang === "csharp";
       const f = (v) => read(join(ld, (cap ? v[0].toUpperCase() + v.slice(1) : v) + "." + ext));
@@ -80,7 +95,7 @@ function feProblems() {
   });
 }
 
-const corpus = { generatedAt: new Date().toISOString(), problems: [...algoProblems(), ...dbProblems(), ...feProblems()] };
+const corpus = { generatedAt: new Date().toISOString(), displayNames, problems: [...algoProblems(), ...dbProblems(), ...feProblems()] };
 writeFileSync(join(dirname(fileURLToPath(import.meta.url)), "problems.generated.json"), JSON.stringify(corpus, null, 2));
 console.log(`baked ${corpus.problems.length} problems -> web/problems.generated.json`);
 

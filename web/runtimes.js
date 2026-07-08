@@ -427,7 +427,73 @@ const Runtimes = (() => {
     };
   }
 
-  const LOADERS = { typescript: loadTypeScript, python: loadPython, ruby: loadRuby, postgres: loadPostgres, wat: loadWat, php: loadPhp, c: loadC, cpp: loadCpp, "asm-6502": load6502 };
+  // -- Game Boy assembly (SM83): customasm.wasm assembles, first-party core runs --
+  // Same shape as load6502: prepend the vendored ruledef + a $0100 bankdef so
+  // users write PLAIN SM83; strict hex parse; instruction-count metric.
+  const NS_PER_INSN_SM83 = 1000, ENTRY_SM83 = 0x0100, IN_SM83 = 0xC000, OUT_SM83 = 0xC010;
+  async function loadSm83() {
+    if (!(await vendored("asm-6502"))) return null;   // shares customasm.wasm
+    const casm = (await WebAssembly.instantiate(
+      await (await fetch("vendor/asm-6502/customasm.wasm")).arrayBuffer()
+    )).instance.exports;
+    const { CpuSm83 } = await import("./retro/cpuSm83.mjs");
+    const rres = await fetch("retro/sm83.ruledef.asm");
+    const RULEDEF = rres.ok ? await rres.text() : "";
+    const RULEDEF_OK = RULEDEF.includes("#ruledef sm83");
+    const PREAMBLE = RULEDEF + "\n#bankdef prog { #addr 0x0100, #outp 0 }\n#bank prog\n";
+    const enc = new TextEncoder(), dec = new TextDecoder();
+    const mkStr = (str) => { const b = enc.encode(str); const q = casm.wasm_string_new(b.length); for (let i = 0; i < b.length; i++) casm.wasm_string_set_byte(q, i, b[i]); return q; };
+    const rdStr = (q) => { const n = casm.wasm_string_get_len(q); const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = casm.wasm_string_get_byte(q, i); return dec.decode(o); };
+    function assemble(source) {
+      const fp = mkStr("hexstr"), ap = mkStr(PREAMBLE + source), op = casm.wasm_assemble(fp, ap);
+      const text = rdStr(op);
+      casm.wasm_string_drop(fp); casm.wasm_string_drop(ap); casm.wasm_string_drop(op);
+      const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
+      const hex = clean.split("\n").map((l) => l.trim()).filter((l) => l && /^[0-9a-fA-F]+$/.test(l)).join("");
+      if (!hex || hex.length % 2) {
+        const raw = clean.trim();
+        if (!raw) return { error: "program assembled to 0 bytes -- did you write any instructions? (comments alone produce no code)" };
+        return { error: raw.slice(0, 800) };
+      }
+      const bytes = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+      return { bytes };
+    }
+    return {
+      run(source, cases) {
+        if (!RULEDEF_OK) return { error: "SM83 ruledef failed to load (retro/sm83.ruledef.asm missing or invalid) -- try a hard refresh." };
+        const asm = assemble(source);
+        if (!asm.bytes) return { error: "SM83 assembly error: " + (asm.error || "unknown (no bytes, no message)") };
+        let totalInsns = 0;
+        const results = cases.map((c, i) => {
+          const ram = new Uint8Array(0x10000);
+          asm.bytes.forEach((b, k) => (ram[(ENTRY_SM83 + k) & 0xffff] = b));
+          const vals = Array.isArray(c.input) ? c.input : Object.values(c.input);
+          vals.forEach((v, k) => (ram[IN_SM83 + k] = v & 0xff));
+          const bus = { read: (a) => ram[a & 0xffff], write: (a, v) => { ram[a & 0xffff] = v & 0xff; } };
+          let got, insns = 0;
+          try {
+            const cpu = new CpuSm83(bus);
+            cpu.pc = ENTRY_SM83;
+            let steps = 0;
+            while (!cpu.halted) {
+              if (steps++ > 200000) throw new Error("runaway (no HALT)");
+              cpu.step();
+            }
+            insns = steps;
+            got = ram[OUT_SM83] | (ram[OUT_SM83 + 1] << 8);   // u16 LE result
+          } catch (e) {
+            return { i, ok: false, error: String((e && e.message) || e), expected: c.expected };
+          }
+          totalInsns += insns;
+          return { i, ok: eq(got, c.expected), got, expected: c.expected };
+        });
+        const insnsPerCase = cases.length ? totalInsns / cases.length : 0;
+        return { results, nsPerCase: insnsPerCase * NS_PER_INSN_SM83, instructions: Math.round(insnsPerCase) };
+      },
+    };
+  }
+  const LOADERS = { typescript: loadTypeScript, python: loadPython, ruby: loadRuby, postgres: loadPostgres, wat: loadWat, php: loadPhp, c: loadC, cpp: loadCpp, "asm-6502": load6502, sm83: loadSm83 };
 
   async function get(lang) {
     if (lang === "javascript") return "native";        // no runtime needed

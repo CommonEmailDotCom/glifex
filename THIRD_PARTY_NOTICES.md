@@ -18,6 +18,7 @@ enabled via `node web/fetch-runtimes.mjs`.
 | CodeMirror | 5.65.18 | In-browser code editor | MIT |
 | customasm | latest | 6502 assembler compiled to WASM (in-browser assembly) | Apache-2.0 |
 | customasm std 6502 ruledef | 0.14.1 | 6502 instruction set, vendored at web/retro/6502.ruledef.asm (assembles plain mnemonics) | Apache-2.0 |
+| customasm std sm83 ruledef | 0.14.1 | SM83 (Game Boy) instruction set, vendored at web/retro/sm83.ruledef.asm (patched: upstream ADD HL,r16 rule bug) | Apache-2.0 |
 
 Each project's full license text ships alongside its vendored files under
 `web/vendor/<name>/` once distributed. Nothing else on glifex.dev embeds

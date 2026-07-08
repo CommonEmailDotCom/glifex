@@ -1,5 +1,9 @@
 {
-  "generatedAt": "2026-07-08T10:52:11.753Z",
+  "generatedAt": "2026-07-08T19:42:31.056Z",
+  "displayNames": {
+    "asm-6502": "6502 assembly",
+    "sm83": "Game Boy assembly"
+  },
   "problems": [
     {
       "id": "001-anagram-detection",
@@ -376,6 +380,11 @@
           "practice": "def solve(input)\n  n = input[\"n\"]\n  # Return the nth Fibonacci number: fib(0)=0, fib(1)=1, fib(2)=1, ...\n  0\nend\n",
           "clean": null,
           "optimized": null
+        },
+        "sm83": {
+          "practice": "; nth Fibonacci -- Game Boy assembly (SM83, customasm syntax)\n;\n; Contract:\n;   * runs at $0100 (the Game Boy cartridge entry) on flat 64KB RAM\n;     (no Game Boy hardware -- no PPU/timers/interrupts; just the CPU)\n;   * input  n is a byte at $C000\n;   * output fib(n) is 16-BIT: low byte -> $C010, high byte -> $C011\n;   * end the program with HALT\n;\n; Hint: unlike the 6502, the SM83 has native 16-bit adds -- keep fib's pair\n; in HL and DE and use ADD HL,DE. Uppercase mnemonics (LD, ADD, JR ...).\n\n    LD A,[$C000]      ; A = n\n    ; TODO: compute fib(n); store low byte -> $C010, high byte -> $C011\n    LD A,0\n    LD [$C010],A\n    LD [$C011],A\n    HALT\n",
+          "clean": "; nth Fibonacci -- Game Boy assembly (SM83), reference (clean)\n;\n; The SM83 has real 16-bit register pairs, so unlike the 6502 there is no\n; hand-rolled carry chaining: HL holds fib(i), DE holds fib(i+1), and\n; ADD HL,DE computes their 16-bit sum in ONE instruction.\n;\n; Each step slides the window (a, b) <- (b, a+b):\n;   PUSH DE           save b\n;   ADD HL,DE         HL = a + b\n;   LD D,H / LD E,L   DE = a + b     (new b)\n;   POP HL            HL = old b     (new a)\n;\n; Result: low byte -> $C010, high byte -> $C011 (little-endian).\n\n    LD HL,0           ; a = fib(0) = 0\n    LD DE,1           ; b = fib(1) = 1\n    LD A,[$C000]      ; A = n\n    LD B,A            ; B is the loop counter\n    OR A              ; sets Z if n == 0\n    JR Z,done\n\nloop:\n    PUSH DE           ; save b\n    ADD HL,DE         ; HL = a + b   (16-bit, one instruction)\n    LD D,H\n    LD E,L            ; DE = a + b   (b' = a + b)\n    POP HL            ; HL = old b   (a' = b)\n    DEC B\n    JR NZ,loop\n\ndone:\n    LD A,L\n    LD [$C010],A      ; result low byte\n    LD A,H\n    LD [$C011],A      ; result high byte\n    HALT\n",
+          "optimized": "; nth Fibonacci -- Game Boy assembly (SM83), reference (optimized)\n; The clean loop is already near-minimal on the SM83 (ADD only targets HL, so\n; the window-slide can't be eliminated). What CAN be trimmed is branch\n; overhead: this version unrolls the loop 2x -- odd n peels one step, then\n; each iteration does TWO fib steps with ONE loop branch. For fib(20):\n; 10 branches instead of 20. Result: lo -> $C010, hi -> $C011.\n\n    LD HL,0           ; a = 0\n    LD DE,1           ; b = 1\n    LD A,[$C000]      ; A = n\n    OR A\n    JR Z,done         ; fib(0) = 0\n    SRL A             ; A = n/2, carry = n odd?\n    JR NC,evenN\n    PUSH DE           ; --- peel one step for odd n ---\n    ADD HL,DE\n    LD D,H\n    LD E,L\n    POP HL\nevenN:\n    OR A              ; n/2 == 0? (n was 1 -> peeled step was all of it)\n    JR Z,done\n\nloop:\n    PUSH DE           ; --- step 1 ---\n    ADD HL,DE\n    LD D,H\n    LD E,L\n    POP HL\n    PUSH DE           ; --- step 2 ---\n    ADD HL,DE\n    LD D,H\n    LD E,L\n    POP HL\n    DEC A             ; one branch per TWO steps\n    JR NZ,loop\n\ndone:\n    LD A,L\n    LD [$C010],A\n    LD A,H\n    LD [$C011],A\n    HALT\n"
         },
         "typescript": {
           "practice": "export function solve(c: { n: number }): number {\n  const n = c.n;\n  // Return the nth Fibonacci number: fib(0)=0, fib(1)=1, fib(2)=1, ...\n  return 0;\n}\n",
