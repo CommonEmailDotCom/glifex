@@ -174,4 +174,4 @@ button.ghost.active { color: var(--accent); border-color: var(--accent); }
 .failed-mark { color: var(--fail); margin-right: .35rem; font-weight: 700; }
 .running { display: flex; align-items: center; gap: .6rem; color: var(--muted); font-size: .85rem; }
 .spinner { width: 14px; height: 14px; flex: none; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: glifex-spin .7s linear infinite; }
-@keyframes glifex-spin { to { transform: rotate(360deg); } }
+@keyframes glifex-spin { to { transform: rotate(360deg); } }\n\n/* refresh button: quiet normally, loud when a newer deploy is available */\n#refresh-btn.update { color: var(--ok, #7ee787); border-color: currentColor; font-weight: 600; }\n

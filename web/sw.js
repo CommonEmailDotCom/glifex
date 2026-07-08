@@ -40,14 +40,20 @@ self.addEventListener("fetch", (e) => {
   // Navigations are network-first: online visitors always get the newest page
   // (so the version badge can never be one deploy behind); the cache answers only
   // when the network can't. Every returned response is COI-stamped.
-  if (e.request.mode === "navigate") {
+  // Navigations AND the corpus are network-first with cache:"no-cache" --
+  // plain fetch() can be answered by the browser HTTP cache (Pages sends
+  // max-age=600), which made "network-first" silently 10 minutes stale.
+  // no-cache forces ETag revalidation: unchanged files are a cheap 304.
+  if (e.request.mode === "navigate" || e.request.url.includes("problems.generated.json")) {
     e.respondWith((async () => {
       try {
-        const res = await fetch(e.request);
+        const res = await fetch(e.request, { cache: "no-cache" });
         caches.open(CACHE).then((c) => c.put(e.request, res.clone()));
         return coi(res);
       } catch {
-        return coi((await caches.match(e.request)) || (await caches.match("index.html")));
+        const hit = await caches.match(e.request);
+        if (hit) return coi(hit);
+        return e.request.mode === "navigate" ? coi(await caches.match("index.html")) : Response.error();
       }
     })());
     return;
