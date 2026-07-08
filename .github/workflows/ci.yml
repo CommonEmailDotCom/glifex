@@ -51,6 +51,7 @@ jobs:
   matrix:
     name: glifex test (${{ matrix.os }})
     needs: [lint, corpus]
+    if: ${{ false }}   # TEMP(free-tier): 3-OS matrix disabled to save minutes (macOS bills 10x, Windows 2x). Re-enable by deleting this line.
     strategy:
       fail-fast: false
       matrix:
@@ -195,6 +196,7 @@ jobs:
 
   # ── Stage 5: security ────────────────────────────────────────────────
   security:
+    if: ${{ false }}   # TEMP(free-tier): advisory job disabled to save minutes. Re-enable by deleting this line.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
