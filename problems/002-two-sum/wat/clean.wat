@@ -1,8 +1,14 @@
 ;; two-sum in WebAssembly Text. Contract (host marshals JSON):
-;;   solve(ptr: i32, len: i32, target: f64) -> i64   ;; (i << 32) | j, or -1
+;;   solve(ptr: i32, len: i32, target: f64) -> (i32, i32)   ;; [i, j], or [-1, -1] if not found
+;; Multi-value return, not a packed i64: a WASM function declared
+;; (result i32 i32) returns a plain JS array [a, b] at the JS boundary
+;; (confirmed directly), which the standard correctness check (a simple
+;; JSON comparison against the oracle's own [i, j] array) can compare
+;; against unchanged -- no BigInt, no bit-packing/unpacking needed
+;; anywhere in the loader or this problem's own validate().
 (module
   (memory (export "memory") 1)
-  (func (export "solve") (param $ptr i32) (param $len i32) (param $target f64) (result i64)
+  (func (export "solve") (param $ptr i32) (param $len i32) (param $target f64) (result i32 i32)
     (local $i i32) (local $j i32) (local $a i32) (local $b i32)
     (block $done
       (loop $outer
@@ -15,11 +21,9 @@
               (local.set $b (i32.load (i32.add (local.get $ptr) (i32.shl (local.get $j) (i32.const 2)))))
               (if (f64.eq (f64.add (f64.convert_i32_s (local.get $a)) (f64.convert_i32_s (local.get $b))) (local.get $target))
                 (then
-                  (return (i64.or
-                    (i64.shl (i64.extend_i32_u (local.get $i)) (i64.const 32))
-                    (i64.extend_i32_u (local.get $j))))))
+                  (return (local.get $i) (local.get $j))))
               (local.set $j (i32.add (local.get $j) (i32.const 1)))
               (br $inner))))
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $outer)))
-    (i64.const -1)))
+    (i32.const -1) (i32.const -1)))

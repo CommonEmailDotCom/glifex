@@ -11,7 +11,24 @@
 const Runtimes = (() => {
   const cache = {};          // lang -> Promise<runner|null>
   const loadErrors = {};     // lang -> error message (loader threw)
-  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // JSON.stringify throws on a raw BigInt (i64 WASM exports return BigInt
+  // at the JS boundary, not Number) -- a replacer that converts it to a
+  // Number keeps the comparison exact for any in-range value (every
+  // current i64 use case does: 003-nth-fibonacci's WAT track stays within
+  // Number.MAX_SAFE_INTEGER by design, see lab-config.mjs) and lets a
+  // BigInt scalar compare equal to the oracle's plain Number expected
+  // value without any loader-level conversion. Never throws: a BigInt
+  // that ISN'T a simple scalar (e.g. 002-two-sum's WAT track packs a
+  // pair into one i64) will still safely compare as "not equal" here
+  // rather than crash, falling through to cfg.validate() as intended.
+  const bigIntSafe = (_, v) => (typeof v === "bigint" ? Number(v) : v);
+  const eq = (a, b) => {
+    try {
+      return JSON.stringify(a, bigIntSafe) === JSON.stringify(b, bigIntSafe);
+    } catch {
+      return false;
+    }
+  };
 
   function script(src) {
     return new Promise((resolve, reject) => {
@@ -247,19 +264,50 @@ const Runtimes = (() => {
         return { error: "WASM instantiate error: " + String(e.message || e) };
       }
       if (typeof solve !== "function") return { error: 'no "solve" export (numbers in, number out)' };
-      // WAT is numeric-only: pass the input object's values positionally.
+      // Two calling conventions, auto-detected from what the module
+      // exports:
+      //  - Pure scalar (e.g. 003-nth-fibonacci's solve(n: i32)): pass the
+      //    input object's values positionally, unchanged.
+      //  - Memory-marshaled (e.g. 002-two-sum's
+      //    solve(ptr: i32, len: i32, target: f64), documented in that
+      //    file's own header comment): the module exports its own
+      //    "memory". Any array-valued input field gets written into that
+      //    memory (as i32 elements, matching what these WAT solutions
+      //    read back via i32.load) and replaced in the argument list with
+      //    (ptr, len); non-array fields pass through unchanged, in order.
+      //    Previously unsupported entirely -- two-sum's WAT track never
+      //    actually worked (confirmed: reported "got=-1" on every case,
+      //    the array argument was silently coerced to garbage before
+      //    this fix, not a regression from any i64-related change).
       // A solve() declared (result i64) returns a BigInt at the JS/WASM
-      // boundary (not a Number) -- convert it here so the oracle
-      // comparison (always a plain JS Number) works unchanged. Only
-      // triggers for i64-returning exports; existing i32-based WAT
-      // solutions are unaffected (typeof stays "number", conversion is a
-      // no-op path). Safe as an exact conversion up to
-      // Number.MAX_SAFE_INTEGER -- the Lab's own ladder ceilings already
-      // stay within that (003-nth-fibonacci caps at n=78, matching the
-      // JS oracle's own exact-double limit; see lab-config.mjs).
+      // boundary, not a Number -- left as-is here (not converted): eq()
+      // (see above) is BigInt-safe for a simple scalar result
+      // (003-nth-fibonacci's WAT track). Multi-value results (e.g. this
+      // problem's own (result i32 i32)) return a plain JS array at the
+      // boundary already -- no BigInt, no packing/unpacking needed at
+      // all; see 002-two-sum/wat/clean.wat's header comment for why that
+      // was chosen over packing a pair into one i64.
+      const memory = instance.exports.memory;
       const callSolve = (input) => {
-        const r = solve(...Object.values(input));
-        return typeof r === "bigint" ? Number(r) : r;
+        const values = Object.values(input);
+        let args = values;
+        if (memory) {
+          let offset = 0, usedMemory = false;
+          const marshaled = [];
+          for (const v of values) {
+            if (Array.isArray(v)) {
+              usedMemory = true;
+              const view = new Int32Array(memory.buffer, offset, v.length);
+              view.set(v);
+              marshaled.push(offset, v.length);
+              offset += v.length * 4;
+            } else {
+              marshaled.push(v);
+            }
+          }
+          if (usedMemory) args = marshaled;
+        }
+        return solve(...args);
       };
       return { measure: (cases, opts) => caseLoop(callSolve, cases, opts) };
     }
