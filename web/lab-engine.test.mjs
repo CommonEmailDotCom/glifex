@@ -169,7 +169,24 @@ ok(CLASSES.length === 6, "fitted model set mirrors the polynomial whitelist");
   // rewritten to use i64 (safe past fib(78), the shared ladder's own
   // ceiling), so WAT now safely uses the exact same ladder as JS.
   ok(JSON.stringify(watSizes) === JSON.stringify(jsSizes), "WAT now uses the exact same shared ladder as JS (i64 rewrite removed the need for its own override)");
-  ok(fib(78) <= Number.MAX_SAFE_INTEGER, "sanity: fib(78) stays exactly representable as a JS Number after BigInt->Number conversion (the oracle's own ceiling, unchanged)");
+  ok(fib(78) <= Number.MAX_SAFE_INTEGER, "sanity: fib(78) stays exactly representable as a JS Number (an i64 WASM result compares equal to it via eq()'s BigInt-safe comparison -- see web/runtimes.js)");
+}
+
+// --- 002-two-sum's WAT track never actually worked: loadWat's generic
+// callSolve only ever supported pure-scalar WASM functions, and
+// two-sum's solve(ptr, len, target) needs the nums array marshaled into
+// WASM memory first (confirmed real report: "got=-1" on every case).
+// clean.wat/optimized.wat also rewritten to use WASM's native multi-
+// value return ((result i32 i32) -> a plain JS array [i,j] at the
+// boundary) instead of packing the pair into a single i64, avoiding
+// BigInt entirely for this problem -- validate() tested here needs no
+// unpacking logic as a result. -------------------------------------
+{
+  const cfg = PROBLEMS["002-two-sum"];
+  ok(typeof cfg.validate === "function", "002-two-sum still has a validate() fallback for semantically-equivalent answers");
+  ok(cfg.validate({ nums: [2, 7, 11, 15], target: 9 }, [0, 1]) === true, "validate() accepts a correct plain-array pair");
+  ok(cfg.validate({ nums: [2, 7, 11, 15], target: 9 }, [-1, -1]) === false, "validate() rejects the not-found sentinel");
+  ok(cfg.validate({ nums: [2, 7, 11, 15], target: 9 }, [1, 0]) === true, "validate() accepts the pair in either order (semantic check, not order-sensitive)");
 }
 
 console.log(`lab-engine battery: ${n}/${n} passed`);
