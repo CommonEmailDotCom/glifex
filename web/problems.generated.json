@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-09T01:26:26.439Z",
+  "generatedAt": "2026-07-09T07:13:12.650Z",
   "displayNames": {
     "asm-6502": "6502 assembly",
     "i8080": "Intel 8080 assembly",
@@ -374,8 +374,8 @@
         },
         "javascript": {
           "practice": "module.exports = function solve(c) {\n  const n = c.n;\n  // Return the nth Fibonacci number: fib(0)=0, fib(1)=1, fib(2)=1, ...\n  return 0;\n};\n",
-          "clean": null,
-          "optimized": null
+          "clean": "// L1-fib-clean: reference solution -- the Lab's correctness oracle for this\n// problem (previously absent; see manifest.toml history / ROADMAP).\nmodule.exports = function solve(c) {\n  const n = c.n;\n  let a = 0, b = 1;\n  for (let i = 0; i < n; i++) {\n    const t = a + b;\n    a = b;\n    b = t;\n  }\n  return a;\n};\n",
+          "optimized": "// L1-fib-optimized: same O(n) window-slide as clean; unrolled 2x so the\n// loop body advances two Fibonacci steps per iteration-counter check --\n// mirrors the 8080 optimized.s's peel-odd-n + unrolled-pair trick, expressed\n// in JS terms (a genuine constant-factor win, same complexity class --\n// matches the manifest's declared O(n) for the optimized variant).\nmodule.exports = function solve(c) {\n  let a = 0, b = 1, i = c.n;\n  if (i & 1) { const t = a + b; a = b; b = t; i--; }\n  for (; i > 0; i -= 2) {\n    const t = a + b;\n    b = t + b;\n    a = t;\n  }\n  return a;\n};\n"
         },
         "python": {
           "practice": "def solve(case):\n    n = case[\"n\"]\n    # Return the nth Fibonacci number: fib(0)=0, fib(1)=1, fib(2)=1, ...\n    return 0\n",
