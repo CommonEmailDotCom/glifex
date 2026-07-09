@@ -36,18 +36,27 @@ test("Complexity Lab renders a verdict card (JavaScript, Two Sum)", async ({ pag
   // otherwise-correct solution (tracked: the wall-tier DCE/JIT-noise known
   // issue, docs/ROADMAP.md's L1 entry). Clicking Analyze again re-samples
   // fresh wall-clock timing (the input DATA is seeded/deterministic; the
-  // TIMING is not), so one retry absorbs a single bad draw of measurement
+  // TIMING is not), so a retry absorbs a single bad draw of measurement
   // noise without weakening what this test actually proves: a STRUCTURAL
   // break (broken engine, a tripped correctness gate, a missing oracle)
   // fails on EVERY attempt, since it isn't timing-dependent.
+  //
+  // Three possible outcomes per attempt now, not two: a real verdict
+  // (refuted or consistent, both start "Upper bound ..."), or "Inconclusive"
+  // (the rep-to-rep consistency floor's own retry-worthy outcome -- an
+  // entirely different card that never contains "Upper bound" at all).
+  // Waiting on only the first pattern hung forever the one time this
+  // actually happened in CI, since the text it was waiting for never
+  // appeared. Bumped to 3 attempts: inconclusive is now a second source of
+  // "try again", raising the chance of back-to-back non-consistent draws.
   let text = "";
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     await page.locator("#lab-btn").click();
     await expect(verdicts.first()).toBeVisible({ timeout: 60000 });
-    await expect(verdicts.first()).toContainText(/Upper bound O\(n\)/, { timeout: 60000 });
+    await expect(verdicts.first()).toContainText(/Upper bound O\(n\)|Inconclusive/, { timeout: 60000 });
     text = await verdicts.first().textContent();
     if (/consistent/i.test(text)) break;
-    if (attempt === 1) console.log("[lab.spec.js] attempt 1 was not consistent (wall-tier timing noise) -- retrying once:", text);
+    if (attempt < 3) console.log(`[lab.spec.js] attempt ${attempt} was not consistent (timing noise or inconclusive) -- retrying:`, text);
   }
   expect(text).toMatch(/consistent/i);
 
