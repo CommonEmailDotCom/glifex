@@ -11,6 +11,7 @@ worked_example = false   # new problem: practice ships BLANK stubs (fillable sta
 wat         = { variants = ["practice", "clean", "optimized"] }
 asm-6502    = { variants = ["practice", "clean", "optimized"] }   # 6502 assembly (browser: customasm + first-party core)
 sm83        = { variants = ["practice", "clean", "optimized"] }   # Game Boy assembly (browser: customasm + first-party core)
+i8080       = { variants = ["practice", "clean", "optimized"] }   # Intel 8080 assembly (browser: customasm + first-party CYCLE-EXACT core; T-states @ 2 MHz + space metrics)
 javascript  = { variants = ["practice"] }
 typescript  = { variants = ["practice"] }
 python      = { variants = ["practice"] }

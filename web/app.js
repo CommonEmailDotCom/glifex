@@ -145,9 +145,17 @@ function renderResults(out, res, opts = {}) {
     `</div>`).join("") +
     `<div class="summary ${allPass ? "ok" : "bad"}">${passed}/${out.results.length} passed</div>`;
   if (allPass && out.nsPerCase) {
-    html += `<div class="timing">~${fmtNs(out.nsPerCase)}/case <span class="dim">(coarse — this device, this runtime; cross-language comparison is not meaningful)</span>` +
-      (opts.compared ? ` · reference optimized: ~${fmtNs(opts.compared)}/case` :
-       ` <a href="#" id="compare-btn">compare vs optimized</a>`) + `</div>`;
+    if (out.cycles && out.clockHz) {
+      const mhz = (out.clockHz / 1e6).toFixed(3);
+      html += `<div class="timing">${out.cycles.toLocaleString()} cycles/case ≈ ${fmtNs(out.nsPerCase)} @ ${mhz} MHz <span class="dim">(deterministic — true per-instruction cycle counts at the reference clock)</span>` +
+        `<br>code ${out.codeBytes} B · workspace ${out.spaceBytes} B` +
+        (opts.compared ? ` · reference optimized: ~${fmtNs(opts.compared)}/case` :
+         ` · <a href="#" id="compare-btn">compare vs optimized</a>`) + `</div>`;
+    } else {
+      html += `<div class="timing">~${fmtNs(out.nsPerCase)}/case <span class="dim">(coarse — this device, this runtime; cross-language comparison is not meaningful)</span>` +
+        (opts.compared ? ` · reference optimized: ~${fmtNs(opts.compared)}/case` :
+         ` <a href="#" id="compare-btn">compare vs optimized</a>`) + `</div>`;
+    }
   }
   res.innerHTML = html;
   const cb = document.getElementById("compare-btn");

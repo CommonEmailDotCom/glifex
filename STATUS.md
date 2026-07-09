@@ -189,6 +189,21 @@ Metric is instruction count (coarse) -- see TODO(cycle-accuracy) in the loaders.
 - Never-stale: SW navigations + corpus fetch with cache:"no-cache" (the browser
   HTTP cache made "network-first" up to 10 min stale); update detection runs at
   boot / tab refocus / every 5 min and lights the header refresh button.
+- Retro core #3: Intel 8080 (web/retro/cpu8080.mjs) -- first CYCLE-EXACT track.
+  T-state-accurate (incl. conditional CALL 17/11, RET 11/5), validated against
+  the CP/M diagnostic ROMs incl. the exhaustive 8080EXM: 23,803,381,171 cycles,
+  every CRC matching real Intel silicon (fixtures + GPLv3 sources vendored at
+  web/retro/test-roms/8080/, stripped from the Pages artifact). Plan pivot,
+  decision of record: Tom Harte SingleStepTests DO NOT EXIST for the 8080 (the
+  org covers z80/sm83/65x02/x86 etc., not 8080) -- CP/M ROM suite is the
+  community-standard validation instead; Harte remains the path for 6502/sm83.
+  UI: deterministic cycles + reference time @ 2.000 MHz + space metrics (code
+  bytes / workspace bytes = distinct RAM written outside the program image).
+  RETRO-CONTRACT paid at n=3: loaders factored to makeRetroLoader(config)
+  (runtimes.js, -80 lines of duplication) + fit-verifier (program/I-O collision
+  = assembly-time error). CI: unit battery + fast three (sub-second) in the
+  spine; retro-exhaustive.yml is workflow_dispatch by design (permanent, not a
+  free-tier diet item) -- run after any cpu8080.mjs change, ~1.5-4 min.
 
 ## Verify everything
 

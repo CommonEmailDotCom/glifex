@@ -48,6 +48,10 @@ jobs:
             || (echo "::error::web/problems.generated.json is stale — run 'node web/build.mjs' and commit" && exit 1)
       - name: Corpus integrity (declared+runnable languages are baked)
         run: node web/corpus-integrity.test.mjs
+      - name: Retro 8080 core (unit battery + fast CP/M diagnostics, <5s)
+        run: |
+          node web/retro/cpu8080.test.mjs
+          node web/retro/harness8080.mjs --suite web/retro/test-roms/8080 --quiet
 
   # ── Stage 2: the core promise — every problem, every language, 3 OSes ──
   matrix:

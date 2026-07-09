@@ -349,151 +349,136 @@ const Runtimes = (() => {
     };
   }
 
-  // -- 6502 assembly: customasm.wasm assembles, 6502.ts (cycle-exact) runs ------
-  // Assemble ABI (raw wasm string-passing) proven from customasm web/main.js;
-  // execute path proven via the retro-smoke CI. Cycles -> deterministic time
-  // (6502 @ 1.0 MHz reference); flows through the standard {results, nsPerCase}.
-  const NS_PER_INSN_6502 = 1000, ENTRY_6502 = 0x0600;
-  async function load6502() {
-    if (!(await vendored("asm-6502"))) return null;
-    const casm = (await WebAssembly.instantiate(
-      await (await fetch("vendor/asm-6502/customasm.wasm")).arrayBuffer()
-    )).instance.exports;
-    const { Cpu6502 } = await import("./retro/cpu6502.mjs");   // first-party, tested core
-    const rres = await fetch("retro/6502.ruledef.asm");
-    const RULEDEF = rres.ok ? await rres.text() : "";
-    const RULEDEF_OK = RULEDEF.includes("#ruledef cpu6502");
-    // Prepend the 6502 instruction set + origin so users write PLAIN 6502 (no
-    // #ruledef/#addr). #bankdef puts labels at $0600 with output starting at byte 0.
-    const PREAMBLE = RULEDEF + "\n#bankdef prog { #addr 0x0600, #outp 0 }\n#bank prog\n";
-    const enc = new TextEncoder(), dec = new TextDecoder();
-    const mkStr = (str) => { const b = enc.encode(str); const q = casm.wasm_string_new(b.length); for (let i = 0; i < b.length; i++) casm.wasm_string_set_byte(q, i, b[i]); return q; };
-    const rdStr = (q) => { const n = casm.wasm_string_get_len(q); const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = casm.wasm_string_get_byte(q, i); return dec.decode(o); };
-    function assemble(source) {
-      const fp = mkStr("hexstr"), ap = mkStr(PREAMBLE + source), op = casm.wasm_assemble(fp, ap);
-      const text = rdStr(op);
-      casm.wasm_string_drop(fp); casm.wasm_string_drop(ap); casm.wasm_string_drop(op);
-      // STRICT parse: the hexstr payload is line(s) of pure hex. Extract hex
-      // ONLY from lines that are entirely hex -- never strip letters out of
-      // diagnostics (words like "resolved"/"error" contain a-f and corrupt).
-      const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
-      const hex = clean.split("\n").map((l) => l.trim()).filter((l) => l && /^[0-9a-fA-F]+$/.test(l)).join("");
-      if (!hex || hex.length % 2) {
-        // ALWAYS a non-empty, verbose error: include the raw assembler output
-        // so failures diagnose themselves in the UI instead of crashing.
-        const raw = clean.trim();
-        if (!raw) return { error: "program assembled to 0 bytes -- did you write any instructions? (comments alone produce no code)" };
-        return { error: raw.slice(0, 800) };
+  // -- Retro assembly tracks: customasm.wasm assembles, first-party cores run --
+  // One generic loader, per-ISA config (RETRO-CONTRACT: factored at n=3 cores).
+  // Assemble ABI (raw wasm string-passing) proven from customasm web/main.js.
+  // Contract per track: program at `entry`, inputs as bytes at `inAddr`,
+  // u16 LE result at `outAddr`, halt instruction ends the run.
+  // Timing metric: if the core exposes `cycles` (8080: T-states, validated
+  // against the CP/M diagnostic ROMs -- see web/retro/test-roms/8080/), report
+  // true cycles and reference time at `clockHz`. Otherwise fall back to the
+  // coarse instruction count at 1000 ns/insn (6502/SM83 until their cycle
+  // tables are validated against Tom Harte's SingleStepTests -- see docs).
+  // Space metric: `spaceBytes` = distinct bytes written outside the program
+  // image (working memory incl. stack), the CS sense of space complexity.
+  function makeRetroLoader(cfg) {
+    return async function loadRetro() {
+      if (!(await vendored("asm-6502"))) return null;   // all tracks share customasm.wasm
+      const casm = (await WebAssembly.instantiate(
+        await (await fetch("vendor/asm-6502/customasm.wasm")).arrayBuffer()
+      )).instance.exports;
+      const core = (await import(cfg.coreModule))[cfg.coreExport];
+      const rres = await fetch(cfg.ruledefPath);
+      const RULEDEF = rres.ok ? await rres.text() : "";
+      const RULEDEF_OK = RULEDEF.includes(cfg.ruledefMarker);
+      // Prepend the instruction set + origin so users write PLAIN assembly (no
+      // #ruledef/#addr). #bankdef puts labels at `entry` with output at byte 0.
+      const PREAMBLE = RULEDEF + "\n#bankdef prog { #addr " + cfg.entry + ", #outp 0 }\n#bank prog\n";
+      const enc = new TextEncoder(), dec = new TextDecoder();
+      const mkStr = (str) => { const b = enc.encode(str); const q = casm.wasm_string_new(b.length); for (let i = 0; i < b.length; i++) casm.wasm_string_set_byte(q, i, b[i]); return q; };
+      const rdStr = (q) => { const n = casm.wasm_string_get_len(q); const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = casm.wasm_string_get_byte(q, i); return dec.decode(o); };
+      function assemble(source) {
+        const fp = mkStr("hexstr"), ap = mkStr(PREAMBLE + source), op = casm.wasm_assemble(fp, ap);
+        const text = rdStr(op);
+        casm.wasm_string_drop(fp); casm.wasm_string_drop(ap); casm.wasm_string_drop(op);
+        // STRICT parse: the hexstr payload is line(s) of pure hex. Extract hex
+        // ONLY from lines that are entirely hex -- never strip letters out of
+        // diagnostics (words like "resolved"/"error" contain a-f and corrupt).
+        const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
+        const hex = clean.split("\n").map((l) => l.trim()).filter((l) => l && /^[0-9a-fA-F]+$/.test(l)).join("");
+        if (!hex || hex.length % 2) {
+          // ALWAYS a non-empty, verbose error: include the raw assembler output
+          // so failures diagnose themselves in the UI instead of crashing.
+          const raw = clean.trim();
+          if (!raw) return { error: "program assembled to 0 bytes -- did you write any instructions? (comments alone produce no code)" };
+          return { error: raw.slice(0, 800) };
+        }
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+        return { bytes };
       }
-      const bytes = new Uint8Array(hex.length / 2);
-      for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-      return { bytes };
-    }
-    return {
-      run(source, cases) {
-        if (!RULEDEF_OK) return { error: "6502 ruledef failed to load (retro/6502.ruledef.asm missing or invalid) -- try a hard refresh; if it persists, the deploy is incomplete." };
-        const asm = assemble(source);
-        if (!asm.bytes) return { error: "6502 assembly error: " + (asm.error || "unknown (no bytes, no message)") };
-        let totalInsns = 0;
-        const results = cases.map((c, i) => {
-          const ram = new Uint8Array(0x10000);
-          asm.bytes.forEach((b, k) => (ram[(ENTRY_6502 + k) & 0xffff] = b));
-          const vals = Array.isArray(c.input) ? c.input : Object.values(c.input);
-          vals.forEach((v, k) => (ram[0x10 + k] = v & 0xff));   // inputs -> $10..
-          const bus = { read: (a) => ram[a & 0xffff], write: (a, v) => { ram[a & 0xffff] = v & 0xff; }, readWord: (a) => ram[a & 0xffff] | (ram[(a + 1) & 0xffff] << 8) };
-          let got, insns = 0;
-          try {
-            const cpu = new Cpu6502(bus);
-            cpu.pc = ENTRY_6502;
-            let steps = 0;
-            while (!cpu.halted) {
-              if (steps++ > 200000) throw new Error("runaway (no BRK)");
-              cpu.step();
+      return {
+        run(source, cases) {
+          if (!RULEDEF_OK) return { error: cfg.name + " ruledef failed to load (" + cfg.ruledefPath + " missing or invalid) -- try a hard refresh; if it persists, the deploy is incomplete." };
+          const asm = assemble(source);
+          if (!asm.bytes) return { error: cfg.name + " assembly error: " + (asm.error || "unknown (no bytes, no message)") };
+          // Fit-verifier: the program image must not collide with the I/O
+          // region or run off the address space (RETRO-CONTRACT).
+          const progEnd = cfg.entry + asm.bytes.length;
+          const ioStart = Math.min(cfg.inAddr, cfg.outAddr);
+          if (progEnd > 0x10000) return { error: cfg.name + ": program is " + asm.bytes.length + " bytes -- runs past the top of the 64K address space from entry 0x" + cfg.entry.toString(16) };
+          if (cfg.entry < ioStart && progEnd > ioStart) return { error: cfg.name + ": program is " + asm.bytes.length + " bytes -- collides with the I/O region at 0x" + ioStart.toString(16) + " (max " + (ioStart - cfg.entry) + " bytes)" };
+          let totalInsns = 0, totalCycles = 0, hasCycles = false, peakSpace = 0;
+          const results = cases.map((c, i) => {
+            const ram = new Uint8Array(0x10000);
+            asm.bytes.forEach((b, k) => (ram[(cfg.entry + k) & 0xffff] = b));
+            const vals = Array.isArray(c.input) ? c.input : Object.values(c.input);
+            vals.forEach((v, k) => (ram[(cfg.inAddr + k) & 0xffff] = v & 0xff));
+            const written = new Uint8Array(0x10000);
+            const bus = {
+              read: (a) => ram[a & 0xffff],
+              write: (a, v) => { ram[a & 0xffff] = v & 0xff; written[a & 0xffff] = 1; },
+              readWord: (a) => ram[a & 0xffff] | (ram[(a + 1) & 0xffff] << 8),
+            };
+            let got, insns = 0;
+            try {
+              const cpu = new core(bus);
+              cpu.pc = cfg.entry;
+              if (cfg.initSp !== undefined) cpu.sp = cfg.initSp;
+              let steps = 0;
+              while (!cpu.halted) {
+                if (steps++ > cfg.maxSteps) throw new Error("runaway (no " + cfg.haltName + ")");
+                cpu.step();
+              }
+              insns = steps;              // instructions executed
+              if (typeof cpu.cycles === "number") { totalCycles += cpu.cycles; hasCycles = true; }
+              got = ram[cfg.outAddr & 0xffff] | (ram[(cfg.outAddr + 1) & 0xffff] << 8);   // u16 LE result
+            } catch (e) {
+              return { i, ok: false, error: String((e && e.message) || e), expected: c.expected };
             }
-            insns = steps;              // instructions executed (coarse metric)
-            got = ram[0x12] | (ram[0x13] << 8);   // result <- $12/$13 (u16 LE)
-          } catch (e) {
-            return { i, ok: false, error: String((e && e.message) || e), expected: c.expected };
+            let space = 0;
+            for (let a = 0; a < 0x10000; a++) if (written[a] && (a < cfg.entry || a >= progEnd)) space++;
+            if (space > peakSpace) peakSpace = space;
+            totalInsns += insns;
+            return { i, ok: eq(got, c.expected), got, expected: c.expected };
+          });
+          const insnsPerCase = cases.length ? totalInsns / cases.length : 0;
+          const out = { results, instructions: Math.round(insnsPerCase), codeBytes: asm.bytes.length, spaceBytes: peakSpace };
+          if (hasCycles && cfg.clockHz) {
+            // True per-instruction cycle totals (input-dependent conditional
+            // timing included) at the ISA's reference clock.
+            const cyclesPerCase = cases.length ? totalCycles / cases.length : 0;
+            out.cycles = Math.round(cyclesPerCase);
+            out.nsPerCase = cyclesPerCase * (1e9 / cfg.clockHz);
+            out.clockHz = cfg.clockHz;
+          } else {
+            // TODO(cycle-accuracy): coarse INSTRUCTION count, not true cycles.
+            // 6502/SM83 cycle tables need page-cross/branch/RMW penalties
+            // validated against Tom Harte's SingleStepTests (see docs).
+            out.nsPerCase = insnsPerCase * 1000;
           }
-          totalInsns += insns;
-          return { i, ok: eq(got, c.expected), got, expected: c.expected };
-        });
-        // TODO(cycle-accuracy): coarse INSTRUCTION count, not true 6502 cycles.
-        // Real cycle timing needs page-cross/branch/RMW penalties validated against
-        // Tom Harte's dataset (see docs). Reported to the UI as "instructions".
-        const insnsPerCase = cases.length ? totalInsns / cases.length : 0;
-        return { results, nsPerCase: insnsPerCase * NS_PER_INSN_6502, instructions: Math.round(insnsPerCase) };
-      },
+          return out;
+        },
+      };
     };
   }
-
-  // -- Game Boy assembly (SM83): customasm.wasm assembles, first-party core runs --
-  // Same shape as load6502: prepend the vendored ruledef + a $0100 bankdef so
-  // users write PLAIN SM83; strict hex parse; instruction-count metric.
-  const NS_PER_INSN_SM83 = 1000, ENTRY_SM83 = 0x0100, IN_SM83 = 0xC000, OUT_SM83 = 0xC010;
-  async function loadSm83() {
-    if (!(await vendored("asm-6502"))) return null;   // shares customasm.wasm
-    const casm = (await WebAssembly.instantiate(
-      await (await fetch("vendor/asm-6502/customasm.wasm")).arrayBuffer()
-    )).instance.exports;
-    const { CpuSm83 } = await import("./retro/cpuSm83.mjs");
-    const rres = await fetch("retro/sm83.ruledef.asm");
-    const RULEDEF = rres.ok ? await rres.text() : "";
-    const RULEDEF_OK = RULEDEF.includes("#ruledef sm83");
-    const PREAMBLE = RULEDEF + "\n#bankdef prog { #addr 0x0100, #outp 0 }\n#bank prog\n";
-    const enc = new TextEncoder(), dec = new TextDecoder();
-    const mkStr = (str) => { const b = enc.encode(str); const q = casm.wasm_string_new(b.length); for (let i = 0; i < b.length; i++) casm.wasm_string_set_byte(q, i, b[i]); return q; };
-    const rdStr = (q) => { const n = casm.wasm_string_get_len(q); const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = casm.wasm_string_get_byte(q, i); return dec.decode(o); };
-    function assemble(source) {
-      const fp = mkStr("hexstr"), ap = mkStr(PREAMBLE + source), op = casm.wasm_assemble(fp, ap);
-      const text = rdStr(op);
-      casm.wasm_string_drop(fp); casm.wasm_string_drop(ap); casm.wasm_string_drop(op);
-      const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
-      const hex = clean.split("\n").map((l) => l.trim()).filter((l) => l && /^[0-9a-fA-F]+$/.test(l)).join("");
-      if (!hex || hex.length % 2) {
-        const raw = clean.trim();
-        if (!raw) return { error: "program assembled to 0 bytes -- did you write any instructions? (comments alone produce no code)" };
-        return { error: raw.slice(0, 800) };
-      }
-      const bytes = new Uint8Array(hex.length / 2);
-      for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-      return { bytes };
-    }
-    return {
-      run(source, cases) {
-        if (!RULEDEF_OK) return { error: "SM83 ruledef failed to load (retro/sm83.ruledef.asm missing or invalid) -- try a hard refresh." };
-        const asm = assemble(source);
-        if (!asm.bytes) return { error: "SM83 assembly error: " + (asm.error || "unknown (no bytes, no message)") };
-        let totalInsns = 0;
-        const results = cases.map((c, i) => {
-          const ram = new Uint8Array(0x10000);
-          asm.bytes.forEach((b, k) => (ram[(ENTRY_SM83 + k) & 0xffff] = b));
-          const vals = Array.isArray(c.input) ? c.input : Object.values(c.input);
-          vals.forEach((v, k) => (ram[IN_SM83 + k] = v & 0xff));
-          const bus = { read: (a) => ram[a & 0xffff], write: (a, v) => { ram[a & 0xffff] = v & 0xff; } };
-          let got, insns = 0;
-          try {
-            const cpu = new CpuSm83(bus);
-            cpu.pc = ENTRY_SM83;
-            let steps = 0;
-            while (!cpu.halted) {
-              if (steps++ > 200000) throw new Error("runaway (no HALT)");
-              cpu.step();
-            }
-            insns = steps;
-            got = ram[OUT_SM83] | (ram[OUT_SM83 + 1] << 8);   // u16 LE result
-          } catch (e) {
-            return { i, ok: false, error: String((e && e.message) || e), expected: c.expected };
-          }
-          totalInsns += insns;
-          return { i, ok: eq(got, c.expected), got, expected: c.expected };
-        });
-        const insnsPerCase = cases.length ? totalInsns / cases.length : 0;
-        return { results, nsPerCase: insnsPerCase * NS_PER_INSN_SM83, instructions: Math.round(insnsPerCase) };
-      },
-    };
-  }
-  const LOADERS = { typescript: loadTypeScript, python: loadPython, ruby: loadRuby, postgres: loadPostgres, wat: loadWat, php: loadPhp, c: loadC, cpp: loadCpp, "asm-6502": load6502, sm83: loadSm83 };
+  const load6502 = makeRetroLoader({
+    name: "6502", coreModule: "./retro/cpu6502.mjs", coreExport: "Cpu6502",
+    ruledefPath: "retro/6502.ruledef.asm", ruledefMarker: "#ruledef cpu6502",
+    entry: 0x0600, inAddr: 0x10, outAddr: 0x12, maxSteps: 200000, haltName: "BRK",
+  });
+  const loadSm83 = makeRetroLoader({
+    name: "SM83", coreModule: "./retro/cpuSm83.mjs", coreExport: "CpuSm83",
+    ruledefPath: "retro/sm83.ruledef.asm", ruledefMarker: "#ruledef sm83",
+    entry: 0x0100, inAddr: 0xC000, outAddr: 0xC010, maxSteps: 200000, haltName: "HALT",
+  });
+  const load8080 = makeRetroLoader({
+    name: "8080", coreModule: "./retro/cpu8080.mjs", coreExport: "Cpu8080",
+    ruledefPath: "retro/8080.ruledef.asm", ruledefMarker: "#ruledef i8080",
+    entry: 0x0100, inAddr: 0xC000, outAddr: 0xC010, maxSteps: 400000, haltName: "HLT",
+    initSp: 0xF000, clockHz: 2000000,   // T-states / 2.000 MHz (original 8080; ROM-validated table)
+  });
+  const LOADERS = { typescript: loadTypeScript, python: loadPython, ruby: loadRuby, postgres: loadPostgres, wat: loadWat, php: loadPhp, c: loadC, cpp: loadCpp, "asm-6502": load6502, sm83: loadSm83, i8080: load8080 };
 
   async function get(lang) {
     if (lang === "javascript") return "native";        // no runtime needed
