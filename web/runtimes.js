@@ -505,18 +505,24 @@ const Runtimes = (() => {
           if (cfg.entry < ioStart && progEnd > ioStart) return { error: cfg.name + ": program is " + asm.bytes.length + " bytes -- collides with the I/O region at 0x" + ioStart.toString(16) + " (max " + (ioStart - cfg.entry) + " bytes)" };
           let totalInsns = 0, totalCycles = 0, hasCycles = false, peakSpace = 0;
           const results = cases.map((c, i) => {
-            const ram = new Uint8Array(0x10000);
-            asm.bytes.forEach((b, k) => (ram[(cfg.entry + k) & 0xffff] = b));
             const vals = Array.isArray(c.input) ? c.input : Object.values(c.input);
-            vals.forEach((v, k) => (ram[(cfg.inAddr + k) & 0xffff] = v & 0xff));
-            const written = new Uint8Array(0x10000);
-            const bus = {
-              read: (a) => ram[a & 0xffff],
-              write: (a, v) => { ram[a & 0xffff] = v & 0xff; written[a & 0xffff] = 1; },
-              readWord: (a) => ram[a & 0xffff] | (ram[(a + 1) & 0xffff] << 8),
-            };
-            let got, insns = 0, caseCycles = null;   // L1-retro-decl
-            try {
+            // Extracted so the SAME single-execution logic can be called
+            // repeatedly for wall-clock timing (cores that don't track
+            // cycles, e.g. SM83 -- see below) without duplicating it.
+            // Fresh RAM/bus/CPU every call: reusing mutated memory across
+            // repeats would corrupt both the returned value AND the
+            // instruction count on repeat 2+, skewing the very timing
+            // being measured.
+            function runOnce() {
+              const ram = new Uint8Array(0x10000);
+              asm.bytes.forEach((b, k) => (ram[(cfg.entry + k) & 0xffff] = b));
+              vals.forEach((v, k) => (ram[(cfg.inAddr + k) & 0xffff] = v & 0xff));
+              const written = new Uint8Array(0x10000);
+              const bus = {
+                read: (a) => ram[a & 0xffff],
+                write: (a, v) => { ram[a & 0xffff] = v & 0xff; written[a & 0xffff] = 1; },
+                readWord: (a) => ram[a & 0xffff] | (ram[(a + 1) & 0xffff] << 8),
+              };
               const cpu = new core(bus);
               cpu.pc = cfg.entry;
               if (cfg.initSp !== undefined) cpu.sp = cfg.initSp;
@@ -525,19 +531,51 @@ const Runtimes = (() => {
                 if (steps++ > cfg.maxSteps) throw new Error("runaway (no " + cfg.haltName + ")");
                 cpu.step();
               }
-              insns = steps;              // instructions executed
-              if (typeof cpu.cycles === "number") { totalCycles += cpu.cycles; hasCycles = true; caseCycles = cpu.cycles; /* L1-retro-cyc */ }
-              got = ram[cfg.outAddr & 0xffff] | (ram[(cfg.outAddr + 1) & 0xffff] << 8);   // u16 LE result
+              const got = ram[cfg.outAddr & 0xffff] | (ram[(cfg.outAddr + 1) & 0xffff] << 8);   // u16 LE result
+              let space = 0;
+              for (let a = 0; a < 0x10000; a++) if (written[a] && (a < cfg.entry || a >= progEnd)) space++;
+              return { got, insns: steps, space, cycles: typeof cpu.cycles === "number" ? cpu.cycles : null };
+            }
+            let first;
+            try {
+              first = runOnce();
             } catch (e) {
               return { i, ok: false, error: String((e && e.message) || e), expected: c.expected };
             }
-            let space = 0;
-            for (let a = 0; a < 0x10000; a++) if (written[a] && (a < cfg.entry || a >= progEnd)) space++;
-            if (space > peakSpace) peakSpace = space;
-            totalInsns += insns;
+            if (first.space > peakSpace) peakSpace = first.space;
+            totalInsns += first.insns;
+            if (first.cycles != null) { totalCycles += first.cycles; hasCycles = true; }
             // L1-retro-rows: per-case exact samples for the Complexity Lab.
-            const row = { i, ok: eq(got, c.expected), got, expected: c.expected, insns, space };
-            if (caseCycles != null) row.cycles = caseCycles;
+            const row = { i, ok: eq(first.got, c.expected), got: first.got, expected: c.expected, insns: first.insns, space: first.space };
+            if (first.cycles != null) {
+              row.cycles = first.cycles;
+            } else {
+              // No cycle counter on this core (e.g. SM83 -- "6502/SM83
+              // coarse until Harte parity", see ROADMAP): the Lab's tier
+              // probe falls through to wall-tier and asks for tNs on
+              // every case. Without this, EVERY case came back with no
+              // timing field at all, and the Lab reported "Inconclusive:
+              // N of N measurements came back below timing resolution"
+              // every single time -- not a resolution problem, a
+              // genuinely missing measurement. Adaptive-repeat wall-clock
+              // timing, mirroring caseLoop's exact thresholds (see that
+              // function, above) for consistency with every other wall-
+              // tier language.
+              const c0 = performance.now();
+              let cdt = performance.now() - c0;
+              if (cdt < 2) {
+                let k = 1;
+                while (cdt < 2 && k < 1048576) {
+                  k *= 2;
+                  const s0 = performance.now();
+                  for (let q = 0; q < k; q++) runOnce();
+                  cdt = performance.now() - s0;
+                }
+                row.tNs = cdt >= 1 ? (cdt * 1e6) / k : null;
+              } else {
+                row.tNs = cdt * 1e6;
+              }
+            }
             return row;
           });
           const insnsPerCase = cases.length ? totalInsns / cases.length : 0;

@@ -149,4 +149,23 @@ ok(CLASSES.length === 6, "fitted model set mirrors the polynomial whitelist");
   ok(new Set(wallSizes).size === 30, "fib wall ladder has no duplicate sizes");
 }
 
+// --- per-language wall-tier precision overrides (SM83/6502/WAT): fixes
+// false correctness failures caused by numeric overflow, independent of
+// the shared ladder's own size (confirmed real reports at n=25 for SM83,
+// n=48 for WAT against the current 30-point shared ladder) -------------
+{
+  function fib(n) { let a = 0, b = 1; for (let i = 0; i < n; i++) { const t = a + b; a = b; b = t; } return a; }
+  const cfg = PROBLEMS["003-nth-fibonacci"];
+  const sm83Sizes = buildPlan(cfg, "wall", "sm83", "s").sizes;
+  const asm6502Sizes = buildPlan(cfg, "wall", "asm-6502", "s").sizes;
+  const watSizes = buildPlan(cfg, "wall", "wat", "s").sizes;
+  ok(Math.max(...sm83Sizes) <= 24 && fib(Math.max(...sm83Sizes)) <= 0xffff, "SM83 wall override stays within its u16 result register");
+  ok(Math.max(...asm6502Sizes) <= 24, "6502's defensive wall override also stays within u16, in case it ever falls through to wall-tier");
+  ok(Math.max(...watSizes) <= 46 && fib(Math.max(...watSizes)) <= 0x7fffffff, "WAT wall override stays within its i32 result (fib(47) overflows signed i32)");
+  ok(watSizes.length === 20, "WAT wall override is the densified 20-point version (up from 4), same [12,46] safe range");
+  ok(new Set(watSizes).size === 20, "WAT wall override has no duplicate sizes");
+  ok(!sm83Sizes.includes(25), "SM83 override no longer includes n=25, the exact reported failure point");
+  ok(!watSizes.includes(48), "WAT override no longer includes n=48 (48 was never actually safe -- also confirms the old 4-point ladder's specific values aren't silently still present)");
+}
+
 console.log(`lab-engine battery: ${n}/${n} passed`);

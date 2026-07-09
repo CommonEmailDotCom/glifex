@@ -113,7 +113,18 @@ export const PROBLEMS = {
       // defensive fallback in case that ever fails to report for some
       // case and it falls through to wall-tier, same as SM83 currently
       // does.
-      wallByLang: { sm83: [3, 6, 12, 24], "asm-6502": [3, 6, 12, 24], wat: [12, 24, 36, 46] },
+      // WAT's ladder was densified from 4 points to 20 (still within the
+      // same [12,46] safe range -- i32 precision is the hard ceiling
+      // here, not point count) after a real report of inconsistent/
+      // refuted results with a signature matching JS's original tiny-
+      // ladder overhead-domination bias (flat step ratios well below
+      // O(n)'s prediction, tiny shared-overhead figure). Unlike JS, WAT
+      // can't escape by going WIDER (i32 caps it at 46), only denser --
+      // this is a reasonable, motivated attempt at the same fix, not a
+      // proven one the way JS's widening was (no vendored WASM runtime
+      // available to validate with real timing data the way JS's fix
+      // was validated).
+      wallByLang: { sm83: [3, 6, 12, 24], "asm-6502": [3, 6, 12, 24], wat: [12, 14, 16, 17, 19, 21, 23, 25, 26, 28, 30, 32, 33, 35, 37, 39, 41, 42, 44, 46] },
     },
     // Retro ladder tops out at 24: fib(25) = 75025 overflows the tracks'
     // u16 result contract. Wall ladder tops at 78: fib(78) is the last
