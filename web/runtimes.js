@@ -256,9 +256,9 @@ const Runtimes = (() => {
       } catch (e) {
         return { error: "WAT assembly error: " + String(e.message || e) };
       }
-      let solve;
+      let solve, instance;
       try {
-        const instance = new WebAssembly.Instance(new WebAssembly.Module(binary), {});
+        instance = new WebAssembly.Instance(new WebAssembly.Module(binary), {});
         solve = instance.exports.solve;
       } catch (e) {
         return { error: "WASM instantiate error: " + String(e.message || e) };
