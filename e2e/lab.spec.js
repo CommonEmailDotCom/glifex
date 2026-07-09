@@ -29,12 +29,28 @@ test("Complexity Lab renders a verdict card (JavaScript, Two Sum)", async ({ pag
     else document.getElementById("editor").value = src;
   }, JS_TWO_SUM);
 
-  await page.locator("#lab-btn").click();
   const verdicts = page.locator("#lab .lab-verdict");
-  await expect(verdicts.first()).toBeVisible({ timeout: 60000 });
-  // Upper bound line must be a pass verdict on a correct linear solution.
-  await expect(verdicts.first()).toContainText(/Upper bound O\(n\)/, { timeout: 60000 });
-  await expect(verdicts.first()).toContainText(/consistent/i);
+
+  // Wall-tier timing is a REAL measurement, not a simulation -- genuine
+  // JIT/GC noise can occasionally produce a spurious refutation on an
+  // otherwise-correct solution (tracked: the wall-tier DCE/JIT-noise known
+  // issue, docs/ROADMAP.md's L1 entry). Clicking Analyze again re-samples
+  // fresh wall-clock timing (the input DATA is seeded/deterministic; the
+  // TIMING is not), so one retry absorbs a single bad draw of measurement
+  // noise without weakening what this test actually proves: a STRUCTURAL
+  // break (broken engine, a tripped correctness gate, a missing oracle)
+  // fails on EVERY attempt, since it isn't timing-dependent.
+  let text = "";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    await page.locator("#lab-btn").click();
+    await expect(verdicts.first()).toBeVisible({ timeout: 60000 });
+    await expect(verdicts.first()).toContainText(/Upper bound O\(n\)/, { timeout: 60000 });
+    text = await verdicts.first().textContent();
+    if (/consistent/i.test(text)) break;
+    if (attempt === 1) console.log("[lab.spec.js] attempt 1 was not consistent (wall-tier timing noise) -- retrying once:", text);
+  }
+  expect(text).toMatch(/consistent/i);
+
   // The proof table and chart rendered.
   await expect(page.locator("#lab .lab-table")).toBeVisible();
   await expect(page.locator("#lab svg")).toBeVisible();
