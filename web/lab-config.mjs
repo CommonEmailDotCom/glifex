@@ -80,7 +80,20 @@ export const PROBLEMS = {
 
   "003-nth-fibonacci": {
     sizeLabel: "n (the input value)",
-    sizes: { det: [3, 6, 12, 24], wall: [16, 32, 55, 78] },
+    sizes: {
+      det: [3, 6, 12, 24],
+      // TEMPORARY/DIAGNOSTIC (requested explicitly, not a final design):
+      // 30 points instead of 4, spread evenly across the same [16,78]
+      // safe range -- gives the consistency floor's tolerance (see
+      // web/lab.js's UNRELIABLE_TOLERANCE) enough real headroom that a
+      // handful of bad individual measurements can be filtered out and
+      // classification can still proceed on the rest, instead of one bad
+      // point blocking the whole analysis. Also surfaces the actual
+      // unreliable-count ("X of 30") for real visibility into how often
+      // this happens under real conditions, pending a decision on the
+      // long-term fix.
+      wall: [16, 18, 20, 22, 25, 27, 29, 31, 33, 35, 37, 40, 42, 44, 46, 48, 50, 52, 54, 57, 59, 61, 63, 65, 67, 69, 72, 74, 76, 78],
+    },
     // Retro ladder tops out at 24: fib(25) = 75025 overflows the tracks'
     // u16 result contract. Wall ladder tops at 78: fib(78) is the last
     // exactly-representable double, and 78 IS the ceiling here (not

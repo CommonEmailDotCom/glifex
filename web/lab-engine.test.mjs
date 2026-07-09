@@ -145,6 +145,8 @@ ok(CLASSES.length === 6, "fitted model set mirrors the polynomial whitelist");
   const wallSizes = PROBLEMS["003-nth-fibonacci"].sizes.wall;
   ok(Math.min(...wallSizes) >= 16, "fib wall ladder floor stays clear of the overhead-dominated tiny-n region (>=16)");
   ok(Math.max(...wallSizes) <= 78, "fib wall ladder ceiling respects fib(78) as the last exact double");
+  ok(wallSizes.length === 30, "fib wall ladder is the temporary/diagnostic 30-point version (up from 4)");
+  ok(new Set(wallSizes).size === 30, "fib wall ladder has no duplicate sizes");
 }
 
 console.log(`lab-engine battery: ${n}/${n} passed`);
