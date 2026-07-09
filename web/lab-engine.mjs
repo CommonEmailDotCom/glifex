@@ -183,6 +183,43 @@ export function judge(modes, roles, declared, tol) {
   return { perMode: cls, upper, lower, theta };
 }
 
+// Empirical-first matching: given measured growth (no specific declared
+// bound to test against -- see lab.js's reveal-state branching for when
+// this applies), check each KNOWN solution variant's own declared bounds
+// and report which ones the data is actually consistent with.
+//
+// Deliberately uses classifyGrowth's `consistent` set (strict per-class
+// tolerance, the same criterion judge()'s "consistent" verdict uses) and
+// NOT a "not refuted" check -- being FASTER than a declared upper bound
+// never refutes it, so a naive "not refuted" test would incorrectly also
+// match genuinely-O(n) data against a variant declared O(n^2). Only a
+// tight fit counts as a match.
+//
+//   modes:         { <modeId>: { ns, ys } }  (same shape as judge())
+//   roles:         { upper: <modeId>, lower: <modeId> }
+//   variantBounds: { <variantId>: { upper: "O(n)"|null, lower: "O(1)"|null } }
+//                  upper===null means this variant has no declared bound
+//                  at all (skipped entirely); lower===null means "not
+//                  declared for this variant" (upper alone can still match
+//                  -- NOT treated as Omega(1), since guessing a lower
+//                  bound that was never stated could be wrong, e.g. a
+//                  problem with no easy/hard input-shape distinction).
+export function matchKnownVariants(modes, roles, variantBounds, tol) {
+  const upC = classifyGrowth(modes[roles.upper].ns, modes[roles.upper].ys, tol);
+  const loC = roles.lower === roles.upper ? upC : classifyGrowth(modes[roles.lower].ns, modes[roles.lower].ys, tol);
+
+  const matches = [];
+  const perVariant = {};
+  for (const [variantId, bounds] of Object.entries(variantBounds)) {
+    if (!bounds || !bounds.upper) { perVariant[variantId] = { upperOk: false, lowerOk: false, skipped: true }; continue; }
+    const upperOk = upC.consistent.includes(bounds.upper);
+    const lowerOk = bounds.lower == null ? true : bounds.lower === "O(1)" ? true : loC.consistent.includes(bounds.lower);
+    perVariant[variantId] = { upperOk, lowerOk, declaredUpper: bounds.upper, declaredLower: bounds.lower };
+    if (upperOk && lowerOk) matches.push(variantId);
+  }
+  return { matches, perVariant, upperClosest: upC.closest, lowerClosest: loC.closest, upC, loC };
+}
+
 export function median(xs) {
   const s = xs.slice().sort((a, b) => a - b);
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;

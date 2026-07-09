@@ -1,10 +1,25 @@
 // Complexity Lab per-problem configuration (L1).
 //
-// L1 scope note: generators, declared bounds, and input-family notes live
-// HERE, in web/, not in problem manifests -- promoting them into the manifest
-// schema (with glifex.py verifier support) is L2, once these shapes have
-// proven out. Declared classes below mirror the manifests' [complexity]
-// claims for the practice variant.
+// Scope note, updated: generators, input families, and buildPlan() live
+// HERE, in web/ -- these need real code (seeded RNGs, per-language ladder
+// overrides), not declarative data, so they stay out of the manifest
+// schema. Per-VARIANT declared bounds ([complexity.LANG.VARIANT] in each
+// problem's manifest.toml, parsed and baked by web/build.mjs into
+// languages[lang].complexity) now DO live in the manifest -- promoted out
+// of here once the shape proved out on 002-two-sum/WAT (brute-force
+// declares O(n^2), clean/optimized declare O(n); previously every variant
+// was tested against the same problem-level bound below regardless,
+// which would have refuted brute-force's OWN intended complexity).
+//
+// declared below is now a FALLBACK ONLY: web/lab.js's determineBoundMode()
+// reads it when a (problem, language) has no manifest-level complexity
+// declarations yet, or as the missing half of a partial revealed bound
+// (see 003-nth-fibonacci's roles.lower === roles.upper case, where a
+// revealed variant's manifest lower bound might not be declared at all --
+// falling back to O(1) there would be a silently WRONG guess, since that
+// problem has no separate easy-case family to exploit). Not every problem
+// has been migrated to full per-variant manifest bounds yet; this field
+// keeps every problem/language working exactly as before until it is.
 //
 // Every generator returns a JSON input matching the problem's schema; the
 // expected output always comes from the JavaScript `clean` oracle at run
