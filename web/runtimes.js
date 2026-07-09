@@ -356,7 +356,24 @@ const Runtimes = (() => {
           "$__g = json_decode(base64_decode('" + b64(JSON.stringify(cases)) + "'), true);\n" +
           "$__o = [];\n" +
           "foreach ($__g as $__i => $__c) {\n" +
-          "  try { $__t = microtime(true); $__r = solve($__c['input']); $__o[] = ['i' => $__i, 'got' => $__r, 't' => (int)round((microtime(true) - $__t) * 1e9)]; }\n" +   // L1-php-time
+          "  try {\n" +
+          "    $__t0 = microtime(true);\n" +
+          "    $__got = solve($__c['input']);\n" +
+          "    $__dt = microtime(true) - $__t0;\n" +
+          "    $__k = 1;\n" +
+          "    if ($__dt < 0.002) {\n" +
+          "      while ($__dt < 0.002 && $__k < 1048576) {\n" +
+          "        $__k = $__k * 2;\n" +
+          "        $__s0 = microtime(true);\n" +
+          "        for ($__q = 0; $__q < $__k; $__q++) { $__sink = solve($__c['input']); }\n" +
+          "        $__dt = microtime(true) - $__s0;\n" +
+          "      }\n" +
+          "      $__tval = $__dt >= 0.001 ? (int)round(($__dt * 1e9) / $__k) : null;\n" +   // L1-php-time
+          "    } else {\n" +
+          "      $__tval = (int)round($__dt * 1e9);\n" +
+          "    }\n" +
+          "    $__o[] = ['i' => $__i, 'got' => $__got, 't' => $__tval];\n" +
+          "  }\n" +
           "  catch (\\Throwable $__e) { $__o[] = ['i' => $__i, 'err' => $__e->getMessage()]; }\n" +
           "}\n" +
           'echo "\n' + BEGIN + '" . json_encode($__o) . "' + END + '\n";' + "\n";
