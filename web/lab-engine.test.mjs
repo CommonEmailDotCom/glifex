@@ -134,4 +134,17 @@ ok(CLASSES.length === 6, "fitted model set mirrors the polynomial whitelist");
   ok(c.consistent.includes("O(n)"), "noisy-but-correct O(n) (30% jitter, seeded): not falsely refuted");
 }
 
+// --- 003-nth-fibonacci's wall ladder must stay large enough to avoid the
+// fixed-overhead-dominated small-n bias (regression guard: an earlier
+// [8,16,32,64] ladder measured a 73% false-refutation rate on the real
+// sampler -- reproducible, not noise, since fixed overhead at n=8-64 is a
+// systematic fraction of the tiny per-call cost. [16,32,55,78] measured
+// 0-7% across the same many-trial test. 78 is a hard ceiling, not
+// headroom: fib(78) is the last exactly-representable double.) ----------
+{
+  const wallSizes = PROBLEMS["003-nth-fibonacci"].sizes.wall;
+  ok(Math.min(...wallSizes) >= 16, "fib wall ladder floor stays clear of the overhead-dominated tiny-n region (>=16)");
+  ok(Math.max(...wallSizes) <= 78, "fib wall ladder ceiling respects fib(78) as the last exact double");
+}
+
 console.log(`lab-engine battery: ${n}/${n} passed`);

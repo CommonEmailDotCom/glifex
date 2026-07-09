@@ -80,10 +80,22 @@ export const PROBLEMS = {
 
   "003-nth-fibonacci": {
     sizeLabel: "n (the input value)",
-    sizes: { det: [3, 6, 12, 24], wall: [8, 16, 32, 64] },
+    sizes: { det: [3, 6, 12, 24], wall: [16, 32, 55, 78] },
     // Retro ladder tops out at 24: fib(25) = 75025 overflows the tracks'
-    // u16 result contract. Wall ladder tops at 64: fib(78) is the last
-    // exactly-representable double, 64 keeps headroom.
+    // u16 result contract. Wall ladder tops at 78: fib(78) is the last
+    // exactly-representable double, and 78 IS the ceiling here (not
+    // conservative headroom under it) -- an earlier [8,16,32,64] ladder
+    // was found to false-refute the declared O(n) bound 73% of the time
+    // (measured directly, many trials of the real sampler): at such tiny n,
+    // fixed per-call overhead (object creation, property access, JIT-level
+    // effects) is a SYSTEMATIC, reproducible fraction of the measured cost,
+    // not noise -- every individual point measures consistently, but the
+    // curve genuinely doesn't look linear yet at n=8-64. Shifting the whole
+    // ladder toward the precision ceiling (rather than widening it, which
+    // would cross into imprecise fib(n) territory and risk a differently-
+    // structured but equally correct solution rounding differently than
+    // the oracle's specific iteration order) resolved it: 0-7% at
+    // [16,32,55,78] across the same many-trial test.
     declared: { upper: "O(n)", lower: "O(n)" },
     roles: { upper: "value", lower: "value" },
     modes: [
