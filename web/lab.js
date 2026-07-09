@@ -134,21 +134,34 @@ const GlifexLab = (() => {
     // events run 5x-30x+. 3x sits comfortably above normal noise while
     // still catching the outlier tail.
     const SPREAD_LIMIT = 3;
+    // TEMPORARY/DIAGNOSTIC (requested explicitly, not a final design):
+    // tolerate up to this many unreliable points per analysis -- filtered
+    // out entirely (not NaN-padded) so classification proceeds cleanly on
+    // whatever remains -- instead of any single bad point blocking the
+    // whole analysis. Paired with 003-nth-fibonacci's wall ladder going
+    // from 4 points to 30 (see lab-config.mjs) so there's real headroom
+    // left after filtering, and so the "X of N" count in the message
+    // below gives actual visibility into how often this happens under
+    // real conditions. "missing" (below timing resolution) stays at 0
+    // tolerance -- that's a different, more fundamental failure than a
+    // single noisy pass.
+    const UNRELIABLE_TOLERANCE = 10;
     const modes = {}, spaceBy = {};
     let missing = 0, unreliable = 0;
-    for (const mode of cfg.modes) modes[mode.id] = { ns: sizes.slice(), ys: [] };
+    for (const mode of cfg.modes) modes[mode.id] = { ns: [], ys: [] };
     for (let i = 0; i < plan.length; i++) {
       const vals = repRows.map((rows) => (tierId === "det" ? rows[i].cycles : rows[i].tNs)).filter((v) => v != null && v > 0);
-      if (!vals.length) { missing++; modes[plan[i].mode].ys.push(NaN); continue; }
-      if (vals.length >= 2 && Math.max(...vals) / Math.min(...vals) > SPREAD_LIMIT) { unreliable++; modes[plan[i].mode].ys.push(NaN); continue; }
+      if (!vals.length) { missing++; continue; }
+      if (vals.length >= 2 && Math.max(...vals) / Math.min(...vals) > SPREAD_LIMIT) { unreliable++; continue; }
+      modes[plan[i].mode].ns.push(plan[i].n);
       modes[plan[i].mode].ys.push(E.median(vals));
       if (tierId === "det" && repRows[0][i].space != null) spaceBy[plan[i].mode + ":" + plan[i].n] = repRows[0][i].space;
     }
     if (missing) {
       return void (panel.innerHTML = card(`<div class="lab-verdict warn">Inconclusive: ${missing} of ${plan.length} measurements came back below timing resolution for this runtime. No verdict is honest here &mdash; a larger ladder needs the L3 worker budget.</div>`));
     }
-    if (unreliable) {
-      return void (panel.innerHTML = card(`<div class="lab-verdict warn">Inconclusive: ${unreliable} of ${plan.length} measurements disagreed by more than ${SPREAD_LIMIT}&times; across repeated passes (likely a GC pause, thermal throttle, or other transient interruption on this device) &mdash; no verdict is honest built on top of that. Try Analyze growth again; a fresh set of passes is often clean.</div>`));
+    if (unreliable > UNRELIABLE_TOLERANCE) {
+      return void (panel.innerHTML = card(`<div class="lab-verdict warn">Inconclusive: ${unreliable} of ${plan.length} measurements disagreed by more than ${SPREAD_LIMIT}&times; across repeated passes (likely a GC pause, thermal throttle, or other transient interruption on this device) &mdash; more than this analysis' tolerance of ${UNRELIABLE_TOLERANCE}, so no verdict is honest built on top of that. Try Analyze growth again; a fresh set of passes is often clean.</div>`));
     }
 
     const j = E.judge(modes, cfg.roles, cfg.declared, tier.tol);

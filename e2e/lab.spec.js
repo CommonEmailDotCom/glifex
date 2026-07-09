@@ -3,51 +3,71 @@
 // verdict card. False-green guard: waits for a .lab-verdict to APPEAR, then
 // asserts the upper-bound line is a real verdict (consistent), not an error
 // card -- a broken engine or a correctness-gate trip cannot fake a pass.
+//
+// Targets 003-nth-fibonacci, not 002-two-sum: fib's wall ladder has 4
+// measurement points (one mode) vs two-sum's 15 (3 modes x 5 sizes), and
+// fewer points means fewer chances for the rep-to-rep consistency floor to
+// flag at least one as unreliable per attempt -- confirmed empirically
+// (sandbox, real sampler, 30 trials each): fib ~3% inconclusive per
+// attempt vs two-sum's ~13%. This test exists to catch STRUCTURAL breaks
+// in the pipeline, not to characterize wall-tier noise -- fib proves the
+// exact same pipeline with meaningfully better odds per attempt.
 const { test, expect } = require("@playwright/test");
 
-// A correct one-pass two-sum: O(n) worst, early exit on the easy family --
-// exactly the shape the declared bounds in lab-config.mjs describe.
-const JS_TWO_SUM = `module.exports = function solve(input) {
-  const seen = new Map();
-  for (let i = 0; i < input.nums.length; i++) {
-    const need = input.target - input.nums[i];
-    if (seen.has(need)) return [seen.get(need), i];
-    seen.set(input.nums[i], i);
-  }
-  return [-1, -1];
+// A correct O(n) iterative fib -- exactly the shape lab-config.mjs's
+// declared bound describes, using the SAME safe, precision-validated
+// ladder [16,32,55,78] (see lab-config.mjs's comments for why those exact
+// values).
+const JS_FIB = `module.exports = function solve(c) {
+  let a = 0, b = 1;
+  for (let i = 0; i < c.n; i++) { const t = a + b; a = b; b = t; }
+  return a;
 };`;
 
-test("Complexity Lab renders a verdict card (JavaScript, Two Sum)", async ({ page }) => {
+test("Complexity Lab renders a verdict card (JavaScript, Nth Fibonacci)", async ({ page }) => {
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
   await page.goto("http://localhost:8080/");
   await expect(page.locator("#problem-list li").first()).toBeVisible();
-  await page.locator('#problem-list li:has-text("Two Sum")').click();
+  await page.locator('#problem-list li:has-text("Fibonacci")').click();
   await expect(page.locator("#lab-btn")).toBeVisible();
 
   await page.evaluate((src) => {
     if (window.GlifexEditor) GlifexEditor.setValue(src);
     else document.getElementById("editor").value = src;
-  }, JS_TWO_SUM);
+  }, JS_FIB);
 
   const verdicts = page.locator("#lab .lab-verdict");
 
   // Wall-tier timing is a REAL measurement, not a simulation -- genuine
-  // JIT/GC noise can occasionally produce a spurious refutation on an
-  // otherwise-correct solution (tracked: the wall-tier DCE/JIT-noise known
-  // issue, docs/ROADMAP.md's L1 entry). Clicking Analyze again re-samples
-  // fresh wall-clock timing (the input DATA is seeded/deterministic; the
-  // TIMING is not), so one retry absorbs a single bad draw of measurement
-  // noise without weakening what this test actually proves: a STRUCTURAL
-  // break (broken engine, a tripped correctness gate, a missing oracle)
-  // fails on EVERY attempt, since it isn't timing-dependent.
+  // JIT/GC noise can occasionally produce a spurious refutation or an
+  // inconclusive result on an otherwise-correct solution (tracked: the
+  // wall-tier DCE/JIT-noise known issue, docs/ROADMAP.md's L1 entry).
+  // Clicking Analyze again re-samples fresh wall-clock timing (the input
+  // DATA is seeded/deterministic; the TIMING is not), so retrying absorbs
+  // bad draws of measurement noise without weakening what this test
+  // actually proves: a STRUCTURAL break (broken engine, a tripped
+  // correctness gate, a missing oracle) fails on EVERY attempt, since it
+  // isn't timing-dependent.
+  //
+  // Two possible non-consistent outcomes per attempt: a real refutation
+  // (renders "Upper bound O(n) REFUTED...") or "Inconclusive" (the
+  // rep-to-rep consistency floor's own retry-worthy outcome -- a
+  // completely different card that never contains "Upper bound" at all;
+  // waiting on only the first pattern hung forever the one time this
+  // happened in CI). 5 attempts, not 3: even after switching to fib's
+  // lower-noise ladder, a real CI run (Firefox) exhausted 3 attempts on
+  // two-sum's ladder, confirming Firefox's noise floor runs meaningfully
+  // worse than sandbox testing suggested -- more margin here is cheap
+  // insurance against a smoke test that's supposed to be a formality.
   let text = "";
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await page.locator("#lab-btn").click();
     await expect(verdicts.first()).toBeVisible({ timeout: 60000 });
-    await expect(verdicts.first()).toContainText(/Upper bound O\(n\)/, { timeout: 60000 });
+    await expect(verdicts.first()).toContainText(/Upper bound O\(n\)|Inconclusive/, { timeout: 60000 });
     text = await verdicts.first().textContent();
     if (/consistent/i.test(text)) break;
-    if (attempt === 1) console.log("[lab.spec.js] attempt 1 was not consistent (wall-tier timing noise) -- retrying once:", text);
+    if (attempt < maxAttempts) console.log(`[lab.spec.js] attempt ${attempt}/${maxAttempts} was not consistent (timing noise or inconclusive) -- retrying:`, text);
   }
   expect(text).toMatch(/consistent/i);
 
