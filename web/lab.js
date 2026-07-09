@@ -78,27 +78,8 @@ const GlifexLab = (() => {
     progress(panel, "Probing runtime tier\u2026");
     const runner = lang === "javascript" ? "js" : await window.Runtimes.get(lang);
     if (!runner) return void (panel.innerHTML = card(`<div class="lab-verdict bad">Runtime for ${esc(lang)} is not available${window.Runtimes.error(lang) ? ": " + esc(window.Runtimes.error(lang)) : ""}.</div>`));
-
-    // COMPILABLE languages get compiled ONCE and measured many times (a
-    // probe, an optional warm-up, then `reps` measured passes) against the
-    // SAME solve reference. Compiling fresh on every one of those calls --
-    // the previous behavior -- discarded the engine's JIT tiering between
-    // calls entirely (confirmed root cause of the wall-tier DCE/noise known
-    // issue: a warm-up pass was warming a function that got thrown away
-    // immediately after). Retro tracks and the compiled-in-browser
-    // toolchains (C/C++/PHP) aren't in this set: they either have no
-    // meaningful "recompile" cost to amortize (retro assembles once per
-    // run already) or do their own internal per-case timing inside a
-    // single invocation (C/C++/PHP), so the old per-call runner.run() path
-    // is kept for them unchanged.
-    const COMPILABLE = new Set(["javascript", "typescript", "python", "ruby", "wat"]);
-    let compiled = null;
-    if (COMPILABLE.has(lang)) {
-      compiled = lang === "javascript" ? window.GlifexJsRuntime.compileJavaScript(source) : runner.compile(source);
-      if (compiled.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(compiled.error)}</div>`));
-    }
-    const runOnce = async (cases) => compiled
-      ? compiled.measure(cases, { skipAggregate: true })
+    const runOnce = async (cases) => runner === "js"
+      ? window.GlifexJsRuntime.runJavaScript(source, cases)
       : await runner.run(source, cases, p.languages[lang]);
 
     const probePlan = C.buildPlan(cfg, "wall", lang, "probe").plan.slice(0, 1);
@@ -113,12 +94,10 @@ const GlifexLab = (() => {
     const seedBase = p.id + ":" + lang + ":L1";
     const { sizes, plan } = C.buildPlan(cfg, tierId, lang, seedBase);
     const cases = plan.map((c) => mkCase(c, oracle));
-    // Wall tiers get one DISCARDED warm-up pass on the already-compiled
-    // reference: even reusing the same solve object, its very first call
-    // still shows some residual noise (inline caches settling, etc.) that
-    // can land anywhere in the ladder and bend the curve (deterministic
-    // cycle tiers don't need it; compiled-language harnesses warm up
-    // inside their own repeat loop).
+    // Wall tiers get one DISCARDED warm-up pass: a fresh script's first
+    // execution carries JIT/compile cost that can land anywhere in the
+    // ladder and bend the curve (deterministic cycle tiers don't need it;
+    // compiled-language harnesses warm up inside their own repeat loop).
     const warm = tierId === "wall" && !(C.LANG_OVERRIDES[lang] && C.LANG_OVERRIDES[lang].reps === 1);
     if (warm) {
       progress(panel, "Warm-up pass (JIT settle; discarded)\u2026");
@@ -144,18 +123,32 @@ const GlifexLab = (() => {
       repRows.push(out.results);
     }
 
-    // Aggregate: median across reps, per (mode, size).
+    // Aggregate: median across reps, per (mode, size). A single measurement
+    // can be wildly unreliable even when it's present (a GC pause, thermal
+    // throttle, or background OS activity hitting one rep) -- catch that at
+    // the source, before it ever reaches bHat estimation or classification,
+    // rather than letting a single bad point cascade into a confidently
+    // wrong verdict downstream. Empirically characterized in sandbox before
+    // picking this threshold: normal rep-to-rep spread has a median of
+    // ~1.04x and a p95 of ~1.6x across many real trials; genuine outlier
+    // events run 5x-30x+. 3x sits comfortably above normal noise while
+    // still catching the outlier tail.
+    const SPREAD_LIMIT = 3;
     const modes = {}, spaceBy = {};
-    let missing = 0;
+    let missing = 0, unreliable = 0;
     for (const mode of cfg.modes) modes[mode.id] = { ns: sizes.slice(), ys: [] };
     for (let i = 0; i < plan.length; i++) {
       const vals = repRows.map((rows) => (tierId === "det" ? rows[i].cycles : rows[i].tNs)).filter((v) => v != null && v > 0);
       if (!vals.length) { missing++; modes[plan[i].mode].ys.push(NaN); continue; }
+      if (vals.length >= 2 && Math.max(...vals) / Math.min(...vals) > SPREAD_LIMIT) { unreliable++; modes[plan[i].mode].ys.push(NaN); continue; }
       modes[plan[i].mode].ys.push(E.median(vals));
       if (tierId === "det" && repRows[0][i].space != null) spaceBy[plan[i].mode + ":" + plan[i].n] = repRows[0][i].space;
     }
     if (missing) {
       return void (panel.innerHTML = card(`<div class="lab-verdict warn">Inconclusive: ${missing} of ${plan.length} measurements came back below timing resolution for this runtime. No verdict is honest here &mdash; a larger ladder needs the L3 worker budget.</div>`));
+    }
+    if (unreliable) {
+      return void (panel.innerHTML = card(`<div class="lab-verdict warn">Inconclusive: ${unreliable} of ${plan.length} measurements disagreed by more than ${SPREAD_LIMIT}&times; across repeated passes (likely a GC pause, thermal throttle, or other transient interruption on this device) &mdash; no verdict is honest built on top of that. Try Analyze growth again; a fresh set of passes is often clean.</div>`));
     }
 
     const j = E.judge(modes, cfg.roles, cfg.declared, tier.tol);
