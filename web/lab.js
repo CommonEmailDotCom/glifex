@@ -162,7 +162,9 @@ const GlifexLab = (() => {
       ? vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)}: unrefutable &mdash; every algorithm is ${OMEGA}(1). Your easy-family growth tracks ${j.perMode[lo.mode].closest}${j.perMode[lo.mode].closest === "O(1)" ? " &mdash; the early exit is real" : " &mdash; the easy inputs are not being exploited"}.`)
       : lo.verdict === "refuted"
         ? vline("bad", `&#10007; Lower bound ${asOmega(lo.declared)} REFUTED &mdash; growth on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family is below it (closest: ${j.perMode[lo.mode].closest}).`)
-        : vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)}: consistent on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family.`);
+        : lo.verdict === "consistent"
+          ? vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)}: consistent on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family &mdash; this run failed to refute it.`)
+          : vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)} holds on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family, but is not tight (growth tracks ${j.perMode[lo.mode].closest}).`);
     // Theta: both ends pin the same class.
     html += j.theta
       ? vline("theta", `${THETA} Growth is pinned between matching bounds: consistent with ${j.theta.cls.replace("O(", THETA + "(")} on these families.`)
