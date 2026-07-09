@@ -12,7 +12,7 @@ wat         = { variants = ["practice", "clean", "optimized"] }
 asm-6502    = { variants = ["practice", "clean", "optimized"] }   # 6502 assembly (browser: customasm + first-party core)
 sm83        = { variants = ["practice", "clean", "optimized"] }   # Game Boy assembly (browser: customasm + first-party core)
 i8080       = { variants = ["practice", "clean", "optimized"] }   # Intel 8080 assembly (browser: customasm + first-party CYCLE-EXACT core; T-states @ 2 MHz + space metrics)
-javascript  = { variants = ["practice"] }
+javascript  = { variants = ["practice", "clean", "optimized"] }   # L1-fib-manifest: JS clean/optimized added -- unblocks the Complexity Lab (oracle is always JS clean) on every language for this problem
 typescript  = { variants = ["practice"] }
 python      = { variants = ["practice"] }
 ruby        = { variants = ["practice"] }

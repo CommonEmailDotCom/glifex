@@ -124,6 +124,13 @@ on the easy family; a Theta badge appears only when both ends pin one class.
       e2e smoke on the JS track. Deterministic (cycle) tracks get tight
       tolerance and exact verdicts; wall tiers get medians + loose
       tolerance and honest "inconclusive" below timing resolution.
+      - Known issue (documented in the PR that added this line;
+        not yet fixed): the wall-tier adaptive-repeat sampler can
+        produce a false REFUTATION (not just "inconclusive") on
+        cheap, side-effect-free solutions -- a dead-code-elimination
+        / JIT-noise gap in the sampler itself. Candidate fixes: an
+        anti-DCE sink, and a magnitude/consistency floor for the
+        inconclusive check. [L1-dce-known-issue]
 - [ ] **L2. Manifest promotion** -- move generators + declared O/Omega into
       problem manifests with verifier support; reconcile with the C3 CLI
       falsifier so browser and CLI share one source of truth.
