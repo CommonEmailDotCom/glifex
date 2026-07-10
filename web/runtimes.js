@@ -49,6 +49,57 @@ const Runtimes = (() => {
     } catch { return false; }
   }
 
+  // Shared worker-call helper: spawn-or-reuse a Worker, send ONE message,
+  // await a response with a timeout, and clean up correctly on error/
+  // timeout so a stuck worker never gets silently reused. Extracted after
+  // noticing this exact mechanic -- addEventListener("message"/"error"),
+  // Promise.race against a timer, terminate-and-clear on failure -- had
+  // been independently hand-rolled, nearly identically, in c-worker.js's
+  // caller code (in this same file) and lab.js's runJsInWorker(). Neither
+  // duplicate was wrong, but a shared helper means the NEXT language
+  // migrated to a Worker (WAT, retro, ...) is mostly configuration, not
+  // re-deriving this mechanic a third time.
+  //
+  // `state` is a plain { worker: null } object the CALLER owns (module-
+  // level, however long a "session" means for that caller) -- this
+  // function creates the Worker if `state.worker` is null, reuses it
+  // otherwise, and clears `state.worker` on any error/timeout. Both
+  // lifecycle policies this codebase actually needs fall out of how the
+  // CALLER manages that object's lifetime, not from anything in here:
+  // pass the SAME state object across many calls for a persistent worker
+  // (lab.js's JS/retro Lab measurements, one worker per analyze()
+  // session, matching cpp-worker.js's own persist-across-calls pattern);
+  // pass a FRESH `{ worker: null }` every single call for a spawn-per-
+  // call worker (what C specifically needs, confirmed the hard way this
+  // session -- Wasmer's entrypoint.run() behaves like a single-use
+  // process invocation, so reusing one across calls hangs).
+  async function callWorker(state, scriptUrl, message, timeoutMs, timeoutMessage) {
+    if (!state.worker) state.worker = new Worker(scriptUrl);
+    const worker = state.worker;
+    try {
+      return await Promise.race([
+        new Promise((resolve, reject) => {
+          const cleanup = () => { worker.removeEventListener("message", onmsg); worker.removeEventListener("error", onerr); };
+          const onmsg = (e) => { cleanup(); resolve(e.data || {}); };
+          const onerr = (e) => { cleanup(); reject(new Error(String((e && e.message) || e))); };
+          worker.addEventListener("message", onmsg);
+          worker.addEventListener("error", onerr);
+          worker.postMessage(message);
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)),
+      ]);
+    } catch (e) {
+      // A genuinely stuck or crashed worker needs a FRESH one for the
+      // next call -- this one may still be wedged. Terminate and clear
+      // so the caller's next callWorker() (with the same state object)
+      // spawns clean rather than reusing something possibly still stuck.
+      worker.terminate();
+      if (state.worker === worker) state.worker = null;
+      throw e;
+    }
+  }
+  if (typeof window !== "undefined") window.callWorker = callWorker;
+
   // opts.skipAggregate: the Lab already has its own per-case tNs data and
   // never reads nsPerCase, so it skips the (potentially expensive -- up to
   // 4096 * cases.length additional calls) aggregate fallback below.

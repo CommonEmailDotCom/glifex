@@ -47,6 +47,32 @@ const GlifexLab = (() => {
 
   let E = null, C = null;              // lab-engine.mjs / lab-config.mjs (lazy ESM)
   let ctx = null;                      // { p, lang } for the visible button
+  // L3 (docs/ROADMAP.md): the JS runtime used to execute directly on the
+  // main thread here, same as every language except C/C++ -- a runaway
+  // solve() (infinite loop, or just much slower than intended at a large
+  // tested n) would freeze the whole tab, since the Lab's own measurement
+  // loop WAS the main thread's only work at that moment. Spawned lazily by
+  // runJsInWorker() (one per analyze() call, reused across every runOnce()
+  // within it -- JS has no single-use-instance constraint the way Wasmer's
+  // WASIX runtime does, confirmed the hard way this session for C, so
+  // reuse across a session is fine here unlike c-worker.js's per-call
+  // spawn). Always terminated in open()'s own finally below, NOT inside
+  // analyze() itself -- analyze() has many early-return paths (correctness
+  // failures, missing runtimes, inconclusive verdicts, and more), and
+  // hanging cleanup off every one of them individually would be exactly
+  // the kind of thing that's easy to miss on the next new early return
+  // someone adds. One place, always runs.
+  //
+  // { worker: null } shape (not a bare variable) because window.
+  // callWorker (runtimes.js) owns and mutates this object directly --
+  // spawns into state.worker if empty, clears it back to null on a
+  // failed/timed-out call so the next runOnce() spawns fresh rather than
+  // reusing something possibly still wedged. Passing the SAME object
+  // across every runOnce() in one analyze() session is what makes this
+  // the persist-across-calls lifecycle; a language needing C's
+  // fresh-per-call lifecycle instead would just pass a NEW { worker:
+  // null } every time.
+  const jsLabWorkerState = { worker: null };
 
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -84,6 +110,8 @@ const GlifexLab = (() => {
         await analyze(ctx.p, ctx.lang, panel);
       } catch (e) {
         panel.innerHTML = card(`<div class="lab-verdict bad">Lab error: ${esc((e && e.message) || e)}</div>`);
+      } finally {
+        if (jsLabWorkerState.worker) { jsLabWorkerState.worker.terminate(); jsLabWorkerState.worker = null; }
       }
     }, (el, html) => { el.innerHTML = card(`<div class="lab-verdict bad">${html}</div>`); });
   }
@@ -117,6 +145,30 @@ const GlifexLab = (() => {
     return { boundMode: "legacy", declared: cfgDeclared };
   }
 
+  // L3 worker-per-run-of-a-session helper for JS (see jsLabWorkerState's
+  // own comment above for the reasoning; goes through window.callWorker,
+  // runtimes.js's shared spawn/message/timeout/cleanup helper). One
+  // JS-side timeout per call -- NOT the same thing as the outer
+  // app-level withRuntimeLock timeout (2 minutes, covers the WHOLE
+  // Run/Analyze call): this one is scoped to a single runOnce() -- one
+  // full (mode x size) plan's worth of cases, not the whole multi-rep
+  // analysis -- so a hang gets caught and reported well before the
+  // outer timeout would even notice something's wrong, and specifically
+  // identifies "your code" as the likely cause rather than a generic
+  // stuck-runtime message.
+  const JS_LAB_TIMEOUT_MS = 20000;
+  async function runJsInWorker(source, cases) {
+    try {
+      const res = await window.callWorker(
+        jsLabWorkerState, "js-lab-worker.js", { id: "measure", source, cases },
+        JS_LAB_TIMEOUT_MS, "Your code took too long to finish (over 20s) -- likely an infinite loop or a much slower algorithm than expected at this input size.");
+      if (res.id === "error") return { error: res.error };
+      return { results: res.results, nsPerCase: res.nsPerCase };
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  }
+
   async function analyze(p, lang, panel) {
     const cfg = C.PROBLEMS[p.id];
     if (!cfg) return void (panel.innerHTML = card('<div class="lab-verdict dim">This problem has no input-family generators yet (web/lab-config.mjs) &mdash; the Lab needs authored best/adversarial families to say anything honest.</div>'));
@@ -144,7 +196,7 @@ const GlifexLab = (() => {
     const runner = lang === "javascript" ? "js" : await window.Runtimes.get(lang);
     if (!runner) return void (panel.innerHTML = card(`<div class="lab-verdict bad">Runtime for ${esc(lang)} is not available${window.Runtimes.error(lang) ? ": " + esc(window.Runtimes.error(lang)) : ""}.</div>`));
     const runOnce = async (cases) => runner === "js"
-      ? window.GlifexJsRuntime.runJavaScript(source, cases)
+      ? await runJsInWorker(source, cases)
       : await runner.run(source, cases, p.languages[lang]);
 
     const probePlan = C.buildPlan(cfg, "wall", lang, "probe").plan.slice(0, 1);
@@ -169,23 +221,92 @@ const GlifexLab = (() => {
       const w = await runOnce(cases);
       if (w.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(w.error)}</div>`));
     }
-    const repRows = [];
-    let detMeta = null;
-    for (let r = 0; r < reps; r++) {
-      progress(panel, `Running ${plan.length} cases &mdash; ${cfg.modes.length} input famil${cfg.modes.length > 1 ? "ies" : "y"} \u00d7 ${sizes.length} sizes (pass ${r + 1}/${reps})\u2026`);
-      const out = await runOnce(cases);
-      if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
-      if (out.clockHz) detMeta = { clockHz: out.clockHz };
-      // Correctness gate: a wrong solution must never reach the fitter.
+    // Correctness gate: a wrong solution must never reach the fitter.
+    // Shared by the initial rep-collection loop below AND the
+    // rep-replacement pass that follows it -- both need the identical
+    // check applied to whatever came back.
+    function correctnessError(results) {
       for (let i = 0; i < plan.length; i++) {
-        const row = out.results[i];
+        const row = results[i];
         let ok = row && row.ok;
         if (!ok && row && cfg.validate) ok = cfg.validate(plan[i].input, row.got);
         if (!ok) {
-          return void (panel.innerHTML = card(`<div class="lab-verdict bad">&#10007; Cannot analyze: the solution is incorrect on a generated input (family &ldquo;${esc(plan[i].mode)}&rdquo;, n=${plan[i].n})${row && row.error ? " &mdash; " + esc(row.error) : ""}. Growth of a wrong answer means nothing &mdash; fix correctness first.</div>`));
+          return `&#10007; Cannot analyze: the solution is incorrect on a generated input (family &ldquo;${esc(plan[i].mode)}&rdquo;, n=${plan[i].n})${row && row.error ? " &mdash; " + esc(row.error) : ""}. Growth of a wrong answer means nothing &mdash; fix correctness first.`;
         }
       }
+      return null;
+    }
+
+    const repRows = [];
+    const repDurations = [];      // wall time for the WHOLE runOnce() call, one entry per rep
+    let detMeta = null;
+    for (let r = 0; r < reps; r++) {
+      progress(panel, `Running ${plan.length} cases &mdash; ${cfg.modes.length} input famil${cfg.modes.length > 1 ? "ies" : "y"} \u00d7 ${sizes.length} sizes (pass ${r + 1}/${reps})\u2026`);
+      const t0 = performance.now();
+      const out = await runOnce(cases);
+      repDurations.push(performance.now() - t0);
+      if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
+      if (out.clockHz) detMeta = { clockHz: out.clockHz };
+      const cErr = correctnessError(out.results);
+      if (cErr) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${cErr}</div>`));
       repRows.push(out.results);
+    }
+
+    // Rep-level outlier detection + replacement: a WHOLE rep uniformly
+    // slower than its siblings -- sustained contention (a background
+    // compile-heavy test sharing the CI runner, a GC pause spanning many
+    // measurements, etc.) during that rep's ENTIRE pass, not a single
+    // point's brief hiccup -- can't be caught by the existing per-point
+    // SPREAD_LIMIT check below, since EVERY point in that rep would be
+    // systematically higher, not scattered. Confirmed via a real CI
+    // failure showing near-total (29-30 of 30) point disagreement in one
+    // run -- a pattern min-of-N alone (which only protects a single
+    // measurement's own brief window, not sustained contention spanning
+    // an entire rep) wouldn't produce; a whole contaminated rep dragging
+    // every point in it above the OTHER reps' values would.
+    //
+    // 2x the fastest rep's total wall time is the bar: a rep's total
+    // duration aggregates over ALL ~30 points, so it should already run
+    // far less noisy than single-point variance does (SPREAD_LIMIT=3,
+    // per that check's own empirical characterization) -- a whole rep
+    // running 2x+ its fastest sibling is a much stronger signal than any
+    // one point crossing 3x. Bounded to exactly one replacement attempt
+    // per flagged rep (not a retry loop) -- keeps the worst case at
+    // double the normal work, not unbounded, and the existing per-point
+    // check remains as a second layer of defense if a replacement is
+    // ALSO contaminated.
+    //
+    // REPLACEMENT_BUDGET_MS additionally caps the WHOLE replacement
+    // phase's total added time, not just each attempt individually --
+    // found necessary after shipping the fix above: under sufficiently
+    // severe, sustained contention (the same conditions that flag reps
+    // as outliers in the first place), MULTIPLE replacement attempts
+    // could each individually stay under any reasonable per-call
+    // timeout while their SUM still pushed the whole analyze() call
+    // past Playwright's own test-level timeout -- turning a
+    // measurement problem this fix was meant to solve into a timeout
+    // problem instead. Once this budget is spent, remaining flagged
+    // reps are left as-is and fall through to the existing per-point
+    // SPREAD_LIMIT/UNRELIABLE_TOLERANCE check below -- exactly how they
+    // would have been handled before this replacement pass existed.
+    const REP_OUTLIER_LIMIT = 2;
+    const REPLACEMENT_BUDGET_MS = 10000;
+    const minRepDuration = Math.min(...repDurations);
+    let replacementBudgetSpent = 0;
+    for (let r = 0; r < reps; r++) {
+      if (repDurations[r] <= minRepDuration * REP_OUTLIER_LIMIT) continue;
+      if (replacementBudgetSpent >= REPLACEMENT_BUDGET_MS) break;
+      progress(panel, `Pass ${r + 1}/${reps} looked contaminated (a whole-pass slowdown, not a single point) &mdash; replacing it\u2026`);
+      const t0 = performance.now();
+      const out = await runOnce(cases);
+      const dt = performance.now() - t0;
+      replacementBudgetSpent += dt;
+      if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
+      if (out.clockHz) detMeta = { clockHz: out.clockHz };
+      const cErr = correctnessError(out.results);
+      if (cErr) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${cErr}</div>`));
+      repRows[r] = out.results;
+      repDurations[r] = dt;
     }
 
     // Aggregate: median across reps, per (mode, size). A single measurement
@@ -217,7 +338,7 @@ const GlifexLab = (() => {
     for (let i = 0; i < plan.length; i++) {
       const vals = repRows.map((rows) => (tierId === "det" ? rows[i].cycles : rows[i].tNs)).filter((v) => v != null && v > 0);
       if (!vals.length) { missing++; continue; }
-      if (vals.length >= 2 && Math.max(...vals) / Math.min(...vals) > SPREAD_LIMIT) { unreliable++; continue; }
+      if (vals.length >= 2 && !E.isReliable(vals, SPREAD_LIMIT)) { unreliable++; continue; }
       modes[plan[i].mode].ns.push(plan[i].n);
       modes[plan[i].mode].ys.push(E.median(vals));
       if (tierId === "det" && repRows[0][i].space != null) spaceBy[plan[i].mode + ":" + plan[i].n] = repRows[0][i].space;

@@ -5,7 +5,7 @@
 // composition, the trivial-Omega(1) rule, and the generator invariants the
 // verdicts depend on (seed determinism; two-sum planted-pair uniqueness;
 // anagram adversarial family really is anagrams).
-import { CLASSES, classById, fitClass, classifyGrowth, judge, matchKnownVariants, median, mulberry32, hashSeed } from "./lab-engine.mjs";
+import { CLASSES, classById, fitClass, classifyGrowth, judge, matchKnownVariants, median, isReliable, mulberry32, hashSeed } from "./lab-engine.mjs";
 import { PROBLEMS, buildPlan, TIERS } from "./lab-config.mjs";
 
 let n = 0;
@@ -64,6 +64,47 @@ const ok = (cond, msg) => { n++; if (!cond) { console.error("FAIL:", msg); proce
 
 // --- utilities ----------------------------------------------------------
 ok(median([3, 1, 2]) === 2 && median([4, 1, 3, 2]) === 2.5, "median odd+even");
+
+// isReliable: majority-agreement point-reliability check, added after a
+// real CI failure pattern (near-total, 22-30 of 30 points flagged
+// unreliable) traced to the OLD full-range (max/min) check being far
+// more fragile than the median it gates -- a single outlier among 3
+// reps could disqualify a point the other 2 agreed on closely.
+{
+  // The exact scenario this replaces the old check for: 2 of 3 reps
+  // agree closely, one is a wild outlier (contention hit just that
+  // rep's measurement of just this point) -- must be reliable, not
+  // disqualified by the one outlier the median would ignore anyway.
+  ok(isReliable([1000, 1050, 8000], 3) === true, "2-of-3 close agreement survives one wild outlier");
+  ok(isReliable([8000, 1000, 1050], 3) === true, "same, unsorted input order");
+
+  // All three agree closely -- clearly reliable.
+  ok(isReliable([1000, 1020, 980], 3) === true, "all three agree closely");
+
+  // No pair agrees anywhere -- genuinely unreliable, not just noisy.
+  ok(isReliable([1000, 5000, 20000], 3) === false, "no agreeing pair anywhere -- genuinely unreliable");
+
+  // Boundary: ratio exactly at spreadLimit is still reliable (<=, not <).
+  ok(isReliable([1000, 3000], 3) === true, "exact boundary ratio (3x) counts as reliable");
+  ok(isReliable([1000, 3000.001], 3) === false, "just over the boundary is unreliable");
+
+  // n=2 edge case: majority must mean BOTH agree, not either one alone.
+  // (Caught as a real bug during design: Math.ceil(2/2)=1 would let a
+  // lone value trivially "agree with itself" and always return true
+  // regardless of the actual spread -- fixed to floor(n/2)+1.)
+  ok(isReliable([1000, 1050], 3) === true, "n=2, both agree -- reliable");
+  ok(isReliable([1000, 9000], 3) === false, "n=2, wide disagreement -- unreliable (not trivially true)");
+
+  // n=1: can't judge reliability from a single sample -- treated as
+  // reliable (matches the existing missing-value handling elsewhere,
+  // which is a separate, stricter check with zero tolerance).
+  ok(isReliable([1000], 3) === true, "n=1 -- can't judge, treated as reliable");
+
+  // n=4: a TRUE majority (3 of 4), not just half (2 of 4).
+  ok(isReliable([1000, 1020, 1050, 9000], 3) === true, "n=4, 3-of-4 agree -- a true majority");
+  ok(isReliable([1000, 1020, 9000, 9500], 3) === false, "n=4, only 2-of-4 agree -- not a majority, unreliable");
+}
+
 ok(mulberry32(1)() !== mulberry32(2)() && mulberry32(9)() === mulberry32(9)(), "prng seeded + deterministic");
 ok(hashSeed("a:b") === hashSeed("a:b") && hashSeed("a:b") !== hashSeed("a:c"), "seed hashing stable + distinct");
 ok(CLASSES.length === 6, "fitted model set mirrors the polynomial whitelist");

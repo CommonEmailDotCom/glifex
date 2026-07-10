@@ -225,6 +225,41 @@ export function median(xs) {
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
 }
 
+// A point's repeated measurements are "reliable" if a MAJORITY of them
+// mutually agree (within spreadLimit of each other), not only if ALL of
+// them do. The straightforward alternative -- comparing the full
+// max/min range against spreadLimit -- lets a SINGLE outlier value
+// disqualify a point the majority actually agrees closely on. That's
+// exactly the failure mode sustained-but-not-total contention produces:
+// most reps land close together, one gets hit by a transient
+// interruption. median(vals) (used downstream once a point passes this
+// gate) is ALREADY robust to exactly one outlier among 3 values -- with
+// an odd count, the middle element can't itself be the extreme -- so
+// the gating check should reflect that same robustness rather than
+// being far more fragile than the statistic it's gating.
+//
+// Sorts once, then slides a window of the majority size across it,
+// checking whether ANY contiguous window (in sorted order, the
+// tightest-possible cluster of that size) falls within spreadLimit.
+// With 3 values this reduces to: do the two smallest agree, OR do the
+// two largest agree? Either is enough to trust the point; agreement
+// nowhere means it's genuinely unreliable, not just noisy.
+export function isReliable(vals, spreadLimit) {
+  if (vals.length < 2) return true;
+  // True majority (strictly more than half), not Math.ceil(n/2) -- that
+  // formula gives 1 when n=2, meaning a single value would trivially
+  // "agree with itself" (ratio 1) regardless of how far apart the two
+  // actual values are, always returning true for exactly the n=2 case
+  // where that's wrong: with only two measurements, agreement has to
+  // mean BOTH agree, not either one alone.
+  const majority = Math.floor(vals.length / 2) + 1;
+  const sorted = vals.slice().sort((a, b) => a - b);
+  for (let i = 0; i + majority <= sorted.length; i++) {
+    if (sorted[i + majority - 1] / sorted[i] <= spreadLimit) return true;
+  }
+  return false;
+}
+
 // Deterministic PRNG so generated inputs are reproducible from a seed the
 // provenance line can name.
 export function mulberry32(seed) {
