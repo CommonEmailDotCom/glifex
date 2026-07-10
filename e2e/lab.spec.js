@@ -66,6 +66,17 @@ function summarizeMatch(text) {
 }
 
 test("Complexity Lab renders a verdict card (JavaScript, Nth Fibonacci, revealed)", async ({ page }) => {
+  // 60s, not the global 30s default: web/lab.js's rep-level outlier
+  // replacement (added after a real CI failure showed sustained,
+  // whole-rep contention corrupting near-every point) can add up to
+  // REPLACEMENT_BUDGET_MS (10s) of bounded extra work on top of the
+  // normal probe+warmup+3-reps sequence specifically to SURVIVE that
+  // contention and still return a correct verdict -- which needs
+  // proportionally more wall-clock room to complete, not a tighter
+  // budget that risks timing out the test instead of the measurement.
+  // Scoped to just these two Lab tests (not the global config) so a
+  // genuine hang anywhere else in the suite still fails fast.
+  test.setTimeout(60000);
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
   await page.goto("http://localhost:8080/");
   await expect(page.locator("#problem-list li").first()).toBeVisible();
@@ -151,6 +162,9 @@ test("Complexity Lab renders a verdict card (JavaScript, Nth Fibonacci, revealed
 });
 
 test("Complexity Lab renders a verdict card (JavaScript, Nth Fibonacci, empirical-match)", async ({ page }) => {
+  // See the revealed-mode test above for the full reasoning -- same
+  // rep-replacement worst case applies here too.
+  test.setTimeout(60000);
   page.on("pageerror", (e) => console.error("[pageerror]", e.message));
   await page.goto("http://localhost:8080/");
   await expect(page.locator("#problem-list li").first()).toBeVisible();

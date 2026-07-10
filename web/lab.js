@@ -275,14 +275,32 @@ const GlifexLab = (() => {
     // double the normal work, not unbounded, and the existing per-point
     // check remains as a second layer of defense if a replacement is
     // ALSO contaminated.
+    //
+    // REPLACEMENT_BUDGET_MS additionally caps the WHOLE replacement
+    // phase's total added time, not just each attempt individually --
+    // found necessary after shipping the fix above: under sufficiently
+    // severe, sustained contention (the same conditions that flag reps
+    // as outliers in the first place), MULTIPLE replacement attempts
+    // could each individually stay under any reasonable per-call
+    // timeout while their SUM still pushed the whole analyze() call
+    // past Playwright's own test-level timeout -- turning a
+    // measurement problem this fix was meant to solve into a timeout
+    // problem instead. Once this budget is spent, remaining flagged
+    // reps are left as-is and fall through to the existing per-point
+    // SPREAD_LIMIT/UNRELIABLE_TOLERANCE check below -- exactly how they
+    // would have been handled before this replacement pass existed.
     const REP_OUTLIER_LIMIT = 2;
+    const REPLACEMENT_BUDGET_MS = 10000;
     const minRepDuration = Math.min(...repDurations);
+    let replacementBudgetSpent = 0;
     for (let r = 0; r < reps; r++) {
       if (repDurations[r] <= minRepDuration * REP_OUTLIER_LIMIT) continue;
+      if (replacementBudgetSpent >= REPLACEMENT_BUDGET_MS) break;
       progress(panel, `Pass ${r + 1}/${reps} looked contaminated (a whole-pass slowdown, not a single point) &mdash; replacing it\u2026`);
       const t0 = performance.now();
       const out = await runOnce(cases);
       const dt = performance.now() - t0;
+      replacementBudgetSpent += dt;
       if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
       if (out.clockHz) detMeta = { clockHz: out.clockHz };
       const cErr = correctnessError(out.results);
