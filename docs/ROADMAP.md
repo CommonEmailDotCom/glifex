@@ -142,11 +142,17 @@ on the easy family; a Theta badge appears only when both ends pin one class.
 - [x] **L1. Browser complexity falsifier, all tiers** -- per-case metric
       samples through the existing runner contract (caseLoop + js-runtime
       wall ns, retro per-case cycles/space, C/C++ harness `[METRIC]` lines
-      behind `--metrics`, PHP in-script timing); generators + declared
-      bounds live in `web/lab-config.mjs` for now; engine battery in CI;
+      behind `--metrics`, PHP in-script timing); engine battery in CI;
       e2e smoke on the JS track. Deterministic (cycle) tracks get tight
       tolerance and exact verdicts; wall tiers get medians + loose
-      tolerance and honest "inconclusive" below timing resolution.
+      tolerance and honest "inconclusive" below timing resolution. Grew
+      well past its original scope: declared bounds are now per-variant
+      (brute-force / clean / optimized can each declare a different
+      bound, not one shared per-problem value), with two distinct judging
+      modes (revealed -- test the open reference's own bound; empirical-
+      match -- no reveal, measure first and report which known variant(s)
+      match). Full detail, evidence, and the still-open C-runtime known
+      issue: STATUS.md's "Complexity Lab (L1)" section.
       - Known issue (documented in the PR that added this line;
         not yet fixed): the wall-tier adaptive-repeat sampler can
         produce a false REFUTATION (not just "inconclusive") on
@@ -160,6 +166,21 @@ on the easy family; a Theta badge appears only when both ends pin one class.
 - [ ] **L3. Worker migration + bigger ladders** -- move lab execution off
       the main thread (cpp-worker pattern), raise size budgets, and close
       the remaining hang exposure for runaway user code at large n.
+- [ ] **L4. Space complexity falsifier** -- extend the declared-bounds
+      system (currently time-only: O/Omega/Theta as time bounds) to test
+      declared SPACE complexity too, using the same falsifier doctrine
+      (refute, never confirm) against growth in measured space rather
+      than measured time. Retro tracks and C/C++ already capture a raw
+      space metric per run (`spaceBytes` -- distinct bytes written outside
+      the program image; C/C++ also report `codeBytes`) but nothing
+      currently judges it against a DECLARED bound the way time is
+      judged. *Spike first:* precise, comparable space measurement is
+      straightforward for retro/native tracks (fixed memory model) but
+      unproven for JS/interpreted/managed-memory tracks -- confirm a
+      viable proxy metric before committing to the full per-variant
+      schema extension. Sequenced after L2/L3 (manifest promotion should
+      land first, so space bounds join the SAME per-variant schema
+      rather than a second, parallel one).
 
 ### C — Corpus era (the forever-work; policy is law as of 002)
 - [ ] **C1. Problems 003+** — floor-of-four, manifest-first, blank stubs,
