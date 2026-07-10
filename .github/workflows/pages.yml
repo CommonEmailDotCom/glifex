@@ -1,6 +1,9 @@
 name: Deploy Pages
 on:
-  push: { branches: [main] }
+  workflow_run:
+    workflows: ["CI"]   # must match ci.yml's `name:` field exactly
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,9 +16,24 @@ jobs:
   # artifact, so the "multiple artifacts named github-pages" failure mode
   # from launch day is structurally impossible now.
   build:
+    # CRITICAL: previously this workflow triggered on any push to main with
+    # zero knowledge of whether CI passed -- a broken change that merged
+    # despite a red CI workflow (see the branch-protection gap fixed in
+    # ci.yml) still deployed straight to production. Now gated on the CI
+    # workflow's own conclusion; workflow_dispatch (a human explicitly
+    # requesting a manual redeploy) is always allowed through, since that's
+    # not automated and carries its own judgment call.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Build the exact commit CI tested, not whatever main happens to
+          # be when this event fires (best practice for workflow_run
+          # triggers -- avoids a drift window on rapid successive pushes).
+          # Falls back to the default ref for workflow_dispatch, which has
+          # no workflow_run context at all.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v6
         with: { node-version: "24" }
       - name: Restore vendored runtimes cache (production, keeps CodeMirror)

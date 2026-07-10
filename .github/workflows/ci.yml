@@ -214,6 +214,45 @@ jobs:
           name: playwright-traces
           path: test-results/
 
+  # ── Stage 4.5: the single required status check ──────────────────────
+  # GitHub's branch protection treats a SKIPPED job as satisfying a
+  # required check, not as a failure. That let a red `playground` job
+  # (which skips its downstream `e2e` via `needs:`) through auto-merge
+  # anyway, since only `e2e` itself was configured as required and
+  # "skipped" reads as "passed" to GitHub. This job is the fix: it
+  # depends on every currently-active job, runs unconditionally via
+  # `if: always()` (so it still runs even when an upstream job failed or
+  # was skipped, rather than being skipped itself the same way), and
+  # explicitly fails if any of them isn't a genuine "success". Point
+  # branch protection's required check at THIS job, not at e2e directly
+  # -- see the repo's Settings > Branches (not something this workflow
+  # file can configure by itself).
+  #
+  # matrix and security are deliberately excluded: both are currently
+  # disabled (if: ${{ false }}), so their result is always "skipped" by
+  # design, not a real signal -- including them here would permanently
+  # block every merge. Add them back in if/when they're re-enabled.
+  ci-status-gate:
+    name: CI status gate (required check)
+    needs: [lint, corpus, playground, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job did not succeed
+        run: |
+          echo "lint:       ${{ needs.lint.result }}"
+          echo "corpus:     ${{ needs.corpus.result }}"
+          echo "playground: ${{ needs.playground.result }}"
+          echo "e2e:        ${{ needs.e2e.result }}"
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.corpus.result }}" != "success" ] || \
+             [ "${{ needs.playground.result }}" != "success" ] || \
+             [ "${{ needs.e2e.result }}" != "success" ]; then
+            echo "::error::One or more required CI jobs did not succeed (see results above) -- this must block merge"
+            exit 1
+          fi
+          echo "All required jobs succeeded."
+
   # ── Stage 5: security ────────────────────────────────────────────────
   security:
     if: ${{ false }}   # TEMP(free-tier): advisory job disabled to save minutes. Re-enable by deleting this line.
