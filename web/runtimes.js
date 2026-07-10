@@ -238,34 +238,41 @@ const Runtimes = (() => {
   // -- Ruby: ruby.wasm --------------------------------------------------
   async function loadRuby() {
     if (!(await vendored("ruby"))) return null;
-    // L3: VM setup+execute moved off the main thread into
-    // ruby-worker.js. Same class of unbounded-hang risk as the other
-    // L3 migrations (JS/TS/WAT/retro): a genuine infinite loop in a
-    // user's Ruby solve() has no built-in step-count safeguard. See
-    // ruby-worker.js's own header comment for the fuller reasoning,
-    // including why (unlike WAT/TypeScript) there's no open question
-    // here about whether a global gets exposed correctly inside a
-    // Worker -- this loader's own UMD-capture approach already
-    // sidesteps that.
-    //
-    // One persistent worker for the whole page session (like the JS
-    // Run button's jsRunWorkerState -- there's only one Ruby
-    // language). Classic worker (the default): this loader uses no
-    // ES-module syntax at all.
-    const rubyWorkerState = { worker: null };
-    const RUBY_TIMEOUT_MS = 20000;
+    // Deterministic UMD capture: the wrapper's first branch is
+    // `typeof exports === 'object' -> factory(exports)`, so evaluating the
+    // file with an explicit exports object hands us the API directly -- no
+    // global-name roulette, identical behavior on every device (the
+    // window-probe approach failed on Android while passing on desktop).
+    const src = await (await fetch("vendor/ruby/browser.umd.js", { cache: "no-cache" })).text();
+    const exportsObj = {};
+    new Function("exports", "module", src)(exportsObj, { exports: exportsObj });
+    const { DefaultRubyVM } = exportsObj;
+    if (!DefaultRubyVM) throw new Error("ruby umd evaluated but exported no DefaultRubyVM");
+    // stdlib build required: the harness does `require "json"`.
+    const res = await fetch("vendor/ruby/ruby+stdlib.wasm");
+    const mod = await WebAssembly.compileStreaming(res);
+    const { vm } = await DefaultRubyVM(mod);
+    // compile() runs vm.eval(source) ONCE (defining solve() in the shared
+    // Ruby VM) and returns a measure() that reuses the same callSolve
+    // across every call -- see the TypeScript loader above for why this
+    // matters (same pattern, same reason).
+    function compile(source) {
+      try {
+        vm.eval(source);                               // defines solve
+      } catch (e) {
+        return { error: "Compile error: " + String(e.message || e) };
+      }
+      const callSolve = (input) => {
+        const r = vm.eval(`require "json"; JSON.generate(solve(JSON.parse(%q(${JSON.stringify(input)}))))`);
+        return JSON.parse(r.toString());
+      };
+      return { measure: (cases, opts) => caseLoop(callSolve, cases, opts) };
+    }
     return {
-      async run(source, cases) {
-        try {
-          const res = await window.callWorker(
-            rubyWorkerState, "ruby-worker.js", { id: "run", source, cases },
-            RUBY_TIMEOUT_MS, "Your code took too long to finish (over 20s) -- likely an infinite loop or code much slower than expected on these inputs.");
-          if (res.id === "error") return { error: res.error };
-          const { id, ...out } = res;
-          return out;
-        } catch (e) {
-          return { error: String((e && e.message) || e) };
-        }
+      compile,
+      run(source, cases) {
+        const c = compile(source);
+        return c.error ? c : c.measure(cases);
       },
     };
   }
@@ -335,77 +342,34 @@ const Runtimes = (() => {
   // loop and is a single WASM invocation.
   async function loadPhp() {
     if (!(await vendored("php"))) return null;
-    const { PhpWeb } = await import("./vendor/php/es.js");
-    const BEGIN = "@@GLIFEX_BEGIN@@", END = "@@GLIFEX_END@@";
-    const b64 = (s) => {
-      const bytes = new TextEncoder().encode(s);
-      let bin = "";
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-      return btoa(bin);
-    };
+    // L3: execution moved off the main thread into php-worker.js.
+    // Same class of unbounded-hang risk as the other L3 migrations. See
+    // php-worker.js's own header comment for the fuller reasoning,
+    // including why (unlike WAT/TypeScript) there's no open question
+    // here about whether a global gets exposed correctly inside a
+    // Worker -- php-worker.js uses the same `import()` module-worker
+    // mechanism retro-worker.js already directly confirmed works.
+    //
+    // One persistent worker for the whole page session (like the JS
+    // Run button's jsRunWorkerState -- there's only one PHP language).
+    // Module worker ({ type: "module" }): matches how vendor/php/es.js
+    // is already loaded on the main thread (a genuine ES module
+    // dynamic import, not a classic script).
+    const phpWorkerState = { worker: null };
+    const PHP_TIMEOUT_MS = 20000;
     return {
       async run(source, cases) {
-        // A fresh throwaway interpreter per Run (like PGlite): reusing one would
-        // hit "Cannot redeclare solve()" on the second run, since php-wasm keeps
-        // memory across run() calls. locateFile pins every .wasm/.data asset to
-        // the vendored dir -- nothing touches a CDN at run time (THE OFFLINE RULE).
-        let out = "";
-        const php = new PhpWeb({
-          print: (s) => { out += s; },
-          printErr: () => {},
-          locateFile: () => "vendor/php/php-web.wasm",
-        });
-        await new Promise((res) => php.addEventListener("ready", res, { once: true }));
-        const stripped = source.replace(/\?>\s*$/, "");   // tolerate a trailing close tag
-        const script = stripped + "\n" +
-          "$__g = json_decode(base64_decode('" + b64(JSON.stringify(cases)) + "'), true);\n" +
-          "$__o = [];\n" +
-          "foreach ($__g as $__i => $__c) {\n" +
-          "  try {\n" +
-          "    $__t0 = microtime(true);\n" +
-          "    $__got = solve($__c['input']);\n" +
-          "    $__dt = microtime(true) - $__t0;\n" +
-          "    $__k = 1;\n" +
-          "    if ($__dt < 0.002) {\n" +
-          "      while ($__dt < 0.002 && $__k < 1048576) {\n" +
-          "        $__k = $__k * 2;\n" +
-          "        $__s0 = microtime(true);\n" +
-          "        for ($__q = 0; $__q < $__k; $__q++) { $__sink = solve($__c['input']); }\n" +
-          "        $__dt = microtime(true) - $__s0;\n" +
-          "      }\n" +
-          "      $__tval = $__dt >= 0.001 ? (int)round(($__dt * 1e9) / $__k) : null;\n" +   // L1-php-time
-          "    } else {\n" +
-          "      $__tval = (int)round($__dt * 1e9);\n" +
-          "    }\n" +
-          "    $__o[] = ['i' => $__i, 'got' => $__got, 't' => $__tval];\n" +
-          "  }\n" +
-          "  catch (\\Throwable $__e) { $__o[] = ['i' => $__i, 'err' => $__e->getMessage()]; }\n" +
-          "}\n" +
-          'echo "\n' + BEGIN + '" . json_encode($__o) . "' + END + '\n";' + "\n";
-        const t0 = performance.now();
         try {
-          await php.run(script);
+          const res = await window.callWorker(
+            phpWorkerState, "php-worker.js", { id: "run", source, cases },
+            PHP_TIMEOUT_MS, "Your code took too long to finish (over 20s) -- likely an infinite loop or code much slower than expected on these inputs.",
+            { type: "module" });
+          if (res.id === "error") return { error: res.error };
+          const { id, ...out } = res;
+          return out;
         } catch (e) {
-          return { error: "PHP runtime error: " + String(e.message || e) };
+          return { error: String((e && e.message) || e) };
         }
-        const dt = performance.now() - t0;
-        const a = out.indexOf(BEGIN), z = out.indexOf(END);
-        if (a === -1 || z === -1) return { error: "PHP produced no result (a fatal error?): " + out.trim().slice(0, 300) };
-        let rows;
-        try {
-          rows = JSON.parse(out.slice(a + BEGIN.length, z));
-        } catch (err) {
-          return { error: "could not parse PHP output: " + String(err.message || err) };
-        }
-        const byI = new Map(rows.map((r) => [r.i, r]));
-        const results = cases.map((c, i) => {
-          const r = byI.get(i);
-          if (!r) return { i, ok: false, error: "no result for case", expected: c.expected };
-          if ("err" in r) return { i, ok: false, error: String(r.err), expected: c.expected };
-          return { i, ok: eq(r.got, c.expected), got: r.got, expected: c.expected, tNs: r.t != null && r.t > 0 ? r.t : null };   // L1-php-rows
-        });
-        const nsPerCase = cases.length ? (dt * 1e6) / cases.length : 0;
-        return { results, nsPerCase };
       },
     };
   }
