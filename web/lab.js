@@ -57,10 +57,38 @@ const GlifexLab = (() => {
     <div class="lab-head"><h2>Complexity Lab</h2><span class="lab-sub">empirical falsifier &mdash; refutes claims, never proves them</span></div>
     ${inner}</div>`;
 
+  // Pure, DOM-free so it can be unit tested directly: given a problem's
+  // langComplexity map, its problem-level fallback declared bound, and
+  // whatever the reveal panel currently shows (or doesn't), decide what
+  // the Lab should test against. Three sources, in priority order:
+  //   1. "revealed" -- the reference panel is open and the active tab has
+  //      its own declared bound for this language: test THAT variant's
+  //      bound specifically (a brute-force reference should be judged
+  //      against O(n^2), not the problem's best-known O(n)).
+  //   2. "empirical-match" -- no specific bound to test (panel closed, or
+  //      the revealed tab has none), but this problem/language DOES have
+  //      per-variant declared bounds on file: measure first, then report
+  //      which known variant(s) the growth actually matches.
+  //   3. "legacy" -- neither available (not yet migrated to per-variant
+  //      manifest bounds): the original problem-level behavior, unchanged.
+  function determineBoundMode(langComplexity, cfgDeclared, revealedVariant) {
+    const revealedBounds = revealedVariant ? langComplexity[revealedVariant] : null;
+    if (revealedBounds && revealedBounds.upper) {
+      return { boundMode: "revealed", declared: { upper: revealedBounds.upper, lower: revealedBounds.lower || cfgDeclared.lower } };
+    }
+    if (Object.keys(langComplexity).length) return { boundMode: "empirical-match", declared: null };
+    return { boundMode: "legacy", declared: cfgDeclared };
+  }
+
   async function analyze(p, lang, panel) {
     const cfg = C.PROBLEMS[p.id];
     if (!cfg) return void (panel.innerHTML = card('<div class="lab-verdict dim">This problem has no input-family generators yet (web/lab-config.mjs) &mdash; the Lab needs authored best/adversarial families to say anything honest.</div>'));
     const source = window.GlifexEditor ? GlifexEditor.getValue() : document.getElementById("editor").value;
+
+    const langComplexity = (p.languages[lang] || {}).complexity || {};
+    const panelEl = document.getElementById("reference-panel");
+    const revealedVariant = panelEl && !panelEl.hidden ? state.refVariant : null;
+    const { boundMode, declared } = determineBoundMode(langComplexity, cfg.declared, revealedVariant);
 
     // Oracle: the JavaScript clean reference produces expected outputs for
     // generated inputs. Inputs are JSON-cloned before the oracle sees them
@@ -164,43 +192,69 @@ const GlifexLab = (() => {
       return void (panel.innerHTML = card(`<div class="lab-verdict warn">Inconclusive: ${unreliable} of ${plan.length} measurements disagreed by more than ${SPREAD_LIMIT}&times; across repeated passes (likely a GC pause, thermal throttle, or other transient interruption on this device) &mdash; more than this analysis' tolerance of ${UNRELIABLE_TOLERANCE}, so no verdict is honest built on top of that. Try Analyze growth again; a fresh set of passes is often clean.</div>`));
     }
 
-    const j = E.judge(modes, cfg.roles, cfg.declared, tier.tol);
-    render(panel, { p, lang, cfg, tierId, tier, reps, sizes, modes, j, detMeta, seedBase, spaceBy });
+    if (boundMode === "empirical-match") {
+      const variantBounds = {};
+      for (const [variant, b] of Object.entries(langComplexity)) {
+        if (variant === "practice") continue;   // a blank starter stub, not a reference solution with a meaningful claim
+        variantBounds[variant] = { upper: b.upper, lower: b.lower };
+      }
+      const mv = E.matchKnownVariants(modes, cfg.roles, variantBounds, tier.tol);
+      // Reuse the existing chart/table rendering by feeding judge() a
+      // "declared" equal to the empirical closest class itself -- always
+      // "consistent" by construction (closest has the smallest error by
+      // definition), so the chart/table render sensibly with no real
+      // declared claim to test against; render() shows different headline
+      // lines for this mode instead of the usual refuted/consistent ones.
+      const j = E.judge(modes, cfg.roles, { upper: mv.upperClosest, lower: mv.lowerClosest }, tier.tol);
+      render(panel, { p, lang, cfg, tierId, tier, reps, sizes, modes, j, detMeta, seedBase, spaceBy, boundMode, mv, variantBounds });
+    } else {
+      const j = E.judge(modes, cfg.roles, declared, tier.tol);
+      render(panel, { p, lang, cfg, tierId, tier, reps, sizes, modes, j, detMeta, seedBase, spaceBy, boundMode, revealedVariant });
+    }
   }
 
   const mkCase = (c, oracle) => ({ input: c.input, expected: oracle(JSON.parse(JSON.stringify(c.input))) });
 
   // ---- rendering ------------------------------------------------------
   function render(panel, X) {
-    const { cfg, tierId, tier, j } = X;
+    const { cfg, tierId, tier, j, boundMode } = X;
     const unit = tierId === "det" ? "cycles" : "ns";
     const vline = (kind, html) => `<div class="lab-verdict ${kind}">${html}</div>`;
 
-    const up = j.upper, lo = j.lower;
     let html = "";
-    // Upper bound, tested on the adversarial family.
-    html += up.verdict === "refuted"
-      ? vline("bad", `&#10007; Upper bound ${up.declared} REFUTED &mdash; growth on the &ldquo;${esc(modeLabel(cfg, up.mode))}&rdquo; family exceeds it (closest: ${j.perMode[up.mode].closest}).`)
-      : up.verdict === "consistent"
-        ? vline("ok", `&#10003; Upper bound ${up.declared}: consistent on the &ldquo;${esc(modeLabel(cfg, up.mode))}&rdquo; family &mdash; this run failed to refute it.`)
-        : vline("ok", `&#10003; Upper bound ${up.declared} holds on the &ldquo;${esc(modeLabel(cfg, up.mode))}&rdquo; family, but is not tight (growth tracks ${j.perMode[up.mode].closest}).`);
-    // Lower bound, tested on the easy family.
-    html += lo.trivial
+    if (boundMode === "empirical-match") {
+      html += matchLines(vline, cfg, X.mv, X.variantBounds);
+    } else {
+      if (boundMode === "revealed") {
+        html += vline("dim", `Testing against the revealed &ldquo;${esc(X.revealedVariant)}&rdquo; solution&rsquo;s own declared bound for ${esc(X.lang)}.`);
+      }
+      const up = j.upper, lo = j.lower;
+      // Upper bound, tested on the adversarial family.
+      html += up.verdict === "refuted"
+        ? vline("bad", `&#10007; Upper bound ${up.declared} REFUTED &mdash; growth on the &ldquo;${esc(modeLabel(cfg, up.mode))}&rdquo; family exceeds it (closest: ${j.perMode[up.mode].closest}).`)
+        : up.verdict === "consistent"
+          ? vline("ok", `&#10003; Upper bound ${up.declared}: consistent on the &ldquo;${esc(modeLabel(cfg, up.mode))}&rdquo; family &mdash; this run failed to refute it.`)
+          : vline("ok", `&#10003; Upper bound ${up.declared} holds on the &ldquo;${esc(modeLabel(cfg, up.mode))}&rdquo; family, but is not tight (growth tracks ${j.perMode[up.mode].closest}).`);
+      // Lower bound, tested on the easy family.
+      html += lo.trivial
       ? vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)}: unrefutable &mdash; every algorithm is ${OMEGA}(1). Your easy-family growth tracks ${j.perMode[lo.mode].closest}${j.perMode[lo.mode].closest === "O(1)" ? " &mdash; the early exit is real" : " &mdash; the easy inputs are not being exploited"}.`)
       : lo.verdict === "refuted"
         ? vline("bad", `&#10007; Lower bound ${asOmega(lo.declared)} REFUTED &mdash; growth on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family is below it (closest: ${j.perMode[lo.mode].closest}).`)
         : lo.verdict === "consistent"
           ? vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)}: consistent on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family &mdash; this run failed to refute it.`)
           : vline("ok", `&#10003; Lower bound ${asOmega(lo.declared)} holds on the &ldquo;${esc(modeLabel(cfg, lo.mode))}&rdquo; family, but is not tight (growth tracks ${j.perMode[lo.mode].closest}).`);
-    // Theta: both ends pin the same class.
-    html += j.theta
-      ? vline("theta", `${THETA} Growth is pinned between matching bounds: consistent with ${j.theta.cls.replace("O(", THETA + "(")} on these families.`)
-      : vline("dim", `No ${THETA} badge: the two families&rsquo; growth does not pin a single class (upper tracks ${j.perMode[up.mode].closest}, lower ${j.perMode[lo.mode].closest}) &mdash; which is itself the point: case spread is real.`);
+      // Theta: both ends pin the same class.
+      html += j.theta
+        ? vline("theta", `${THETA} Growth is pinned between matching bounds: consistent with ${j.theta.cls.replace("O(", THETA + "(")} on these families.`)
+        : vline("dim", `No ${THETA} badge: the two families&rsquo; growth does not pin a single class (upper tracks ${j.perMode[up.mode].closest}, lower ${j.perMode[lo.mode].closest}) &mdash; which is itself the point: case spread is real.`);
+    }
     if (cfg.note) html += `<p class="lab-note">${esc(cfg.note)}</p>`;
 
     html += chart(X, unit);
     html += table(X, unit);
-    html += `<p class="lab-note">O / ${OMEGA} / ${THETA} are BOUNDS, not case names: worst, average, and best case are different cost functions from different input families, and each can carry any bound. The card tests the declared O on the adversarial family and the declared ${OMEGA} on the easy one; ${THETA} appears only when both ends pin the same class. Refutations are conclusive; &ldquo;consistent&rdquo; only means this run failed to refute &mdash; a curve can never prove a bound.</p>`;
+    html += boundMode === "empirical-match"
+      ? `<p class="lab-note">No solution was revealed, so there was no specific claim to refute &mdash; this mode measures growth first and reports which known solution type(s) (if any) it matches, using the same tolerance-based classification as every refutation elsewhere in this tool. Reveal a specific solution (clean, optimized, brute-force&hellip;) to test your code against THAT variant's own declared bound instead.</p>`
+      : `<p class="lab-note">O / ${OMEGA} / ${THETA} are BOUNDS, not case names: worst, average, and best case are different cost functions from different input families, and each can carry any bound. The card tests the declared O on the adversarial family and the declared ${OMEGA} on the easy one; ${THETA} appears only when both ends pin the same class. Refutations are conclusive; &ldquo;consistent&rdquo; only means this run failed to refute &mdash; a curve can never prove a bound.</p>`;
     html += `<div class="lab-prov">${prov(X)}</div>`;
     panel.innerHTML = card(html);
 
@@ -211,6 +265,29 @@ const GlifexLab = (() => {
   }
 
   const modeLabel = (cfg, id) => (cfg.modes.find((m) => m.id === id) || { label: id }).label;
+
+  // Empirical-match mode's headline lines: no revealed solution to test a
+  // specific claim against, so report the measured growth and which known
+  // variant(s) -- if any -- it's actually consistent with.
+  function matchLines(vline, cfg, mv, variantBounds) {
+    const sameRole = cfg.roles.upper === cfg.roles.lower;
+    const upLabel = modeLabel(cfg, cfg.roles.upper), loLabel = modeLabel(cfg, cfg.roles.lower);
+    let html = vline("dim", `No solution revealed &mdash; measuring first, then comparing against every known solution type&rsquo;s own declared bounds.`);
+    html += sameRole
+      ? vline("dim", `Empirical growth on the &ldquo;${esc(upLabel)}&rdquo; family: closest to ${mv.upperClosest}.`)
+      : vline("dim", `Empirical growth: closest to ${mv.upperClosest} on the &ldquo;${esc(upLabel)}&rdquo; family, ${mv.lowerClosest} on the &ldquo;${esc(loLabel)}&rdquo; family.`);
+    if (mv.matches.length) {
+      const names = mv.matches.map((v) => {
+        const b = variantBounds[v];
+        return `<b>${esc(v)}</b> (declared ${esc(b.upper)}${b.lower ? ", " + asOmega(b.lower) : ""})`;
+      }).join(", ");
+      html += vline("ok", `&#10003; Matches known solution type${mv.matches.length > 1 ? "s" : ""}: ${names}.`);
+    } else {
+      const ref = Object.entries(variantBounds).map(([v, b]) => `${esc(v)}=${esc(b.upper || "?")}${b.lower ? "/" + asOmega(b.lower) : ""}`).join(", ");
+      html += vline("warn", `Did not match any known solution type for this problem/language. Reference: ${ref}.`);
+    }
+    return html;
+  }
 
   function chart(X, unit) {
     const { cfg, modes, j } = X;
@@ -230,9 +307,12 @@ const GlifexLab = (() => {
     }
     for (const n of modes[cfg.modes[0].id].ns)
       g += `<line x1="${Xc(n)}" y1="${T}" x2="${Xc(n)}" y2="${H - B}" stroke="#232b38"/><text x="${Xc(n)}" y="${H - B + 13}" text-anchor="middle" fill="#8b949e" font-size="10">${n}</text>`;
-    // Declared-upper fit on the adversarial family, dashed, for the eye.
+    // Upper-bound fit on the adversarial family, dashed, for the eye --
+    // the declared bound being tested (revealed/legacy mode) or the
+    // empirical closest class itself (empirical-match mode, where there's
+    // no real declared claim -- see X.boundMode).
     const upM = modes[cfg.roles.upper];
-    const fit = E.fitClass(E.classById(cfg.declared.upper).f, upM.ns, upM.ys);
+    const fit = E.fitClass(E.classById(j.upper.declared).f, upM.ns, upM.ys);
     let d = "";
     for (let i = 0; i <= 48; i++) {
       const n = 10 ** (x0 + ((x1 - x0) * i) / 48), y = fit.predict(n);
@@ -248,7 +328,7 @@ const GlifexLab = (() => {
     g += `<text x="${(L + W - R) / 2}" y="${H - 5}" text-anchor="middle" fill="#8b949e" font-size="10">${esc(cfg.sizeLabel)} (log)</text>`;
     g += `<text x="13" y="${(T + H - B) / 2}" fill="#8b949e" font-size="10" transform="rotate(-90 13 ${(T + H - B) / 2})" text-anchor="middle">${unit} / case (log)</text>`;
     const legend = cfg.modes.map((m) => `<span class="lab-k" style="background:${MODE_COLORS[m.id] || "#6ea8fe"}"></span>${esc(m.label)}`).join(" ")
-      + ` <span class="lab-k lab-k-dash"></span>declared ${cfg.declared.upper} fit (intercept absorbs fixed overhead)`;
+      + ` <span class="lab-k lab-k-dash"></span>${X.boundMode === "empirical-match" ? "closest-fit" : "declared"} ${j.upper.declared} fit (intercept absorbs fixed overhead)`;
     return `<figure class="lab-fig"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="growth chart" font-family="var(--mono)">${g}</svg><figcaption>${legend}</figcaption></figure>`;
   }
 
@@ -260,7 +340,7 @@ const GlifexLab = (() => {
   }
 
   function tableFor(X, unit, modeId) {
-    const cls = X.j.perMode[modeId], declared = modeId === X.cfg.roles.upper ? X.cfg.declared.upper : X.cfg.declared.lower;
+    const cls = X.j.perMode[modeId], declared = modeId === X.cfg.roles.upper ? X.j.upper.declared : X.j.lower.declared;
     const names = E.CLASSES.map((c) => c.id);
     let h = `<table class="lab-table"><tr><th>step</th><th>measured &times;</th>${names.map((n) => `<th${n === declared ? ' class="declared"' : ""}>${n === declared ? "declared " : ""}${n} &times;</th>`).join("")}${X.tierId === "det" ? "<th>workspace B</th>" : ""}</tr>`;
     for (const r of cls.rows) {

@@ -5,7 +5,7 @@
 // composition, the trivial-Omega(1) rule, and the generator invariants the
 // verdicts depend on (seed determinism; two-sum planted-pair uniqueness;
 // anagram adversarial family really is anagrams).
-import { CLASSES, classById, fitClass, classifyGrowth, judge, median, mulberry32, hashSeed } from "./lab-engine.mjs";
+import { CLASSES, classById, fitClass, classifyGrowth, judge, matchKnownVariants, median, mulberry32, hashSeed } from "./lab-engine.mjs";
 import { PROBLEMS, buildPlan, TIERS } from "./lab-config.mjs";
 
 let n = 0;
@@ -189,4 +189,66 @@ ok(CLASSES.length === 6, "fitted model set mirrors the polynomial whitelist");
   ok(cfg.validate({ nums: [2, 7, 11, 15], target: 9 }, [1, 0]) === true, "validate() accepts the pair in either order (semantic check, not order-sensitive)");
 }
 
+// --- matchKnownVariants: empirical-first matching against per-variant
+// declared bounds (no specific claim revealed to test -- see lab.js's
+// "empirical-match" mode). Deliberately uses classifyGrowth's strict
+// `consistent` set, not a "not refuted" check -- being FASTER than a
+// declared upper bound never refutes it, so a naive check would
+// incorrectly also match genuinely-O(n) data against a variant declared
+// O(n^2). Only a tight fit counts as a match. ---------------------------
+{
+  const ns = [64, 128, 256, 512, 1024];
+  const linear = { ns, ys: ns.map((x) => 10 * x + 500) };
+  const quad = { ns, ys: ns.map((x) => 0.05 * x * x + 500) };
+  const constant = { ns, ys: ns.map(() => 100) };
+  const variantBounds = {
+    "brute-force": { upper: "O(n^2)", lower: "O(1)" },
+    clean: { upper: "O(n)", lower: "O(1)" },
+    optimized: { upper: "O(n)", lower: "O(1)" },
+  };
+  const roles = { upper: "worst", lower: "best" };
+
+  const mLinear = matchKnownVariants({ worst: linear, best: constant }, roles, variantBounds, TIERS.wall.tol);
+  ok(mLinear.matches.includes("clean") && mLinear.matches.includes("optimized"), "O(n) data matches both clean and optimized (same declared bound -- list all matches)");
+  ok(!mLinear.matches.includes("brute-force"), "O(n) data does NOT match brute-force's declared O(n^2)");
+
+  const mQuad = matchKnownVariants({ worst: quad, best: constant }, roles, variantBounds, TIERS.wall.tol);
+  ok(mQuad.matches.length === 1 && mQuad.matches[0] === "brute-force", "O(n^2) data matches ONLY brute-force");
+  ok(!mQuad.matches.includes("clean"), "O(n^2) data does NOT match clean's declared O(n) -- being slower refutes a tighter upper bound");
+
+  const cubic = { ns, ys: ns.map((x) => 0.0002 * x * x * x + 500) };
+  const mCubic = matchKnownVariants({ worst: cubic, best: constant }, roles, variantBounds, TIERS.wall.tol);
+  ok(mCubic.matches.length === 0, "O(n^3) data matches no known variant (none declares O(n^3))");
+  ok(mCubic.upperClosest === "O(n^3)", "no-match case still reports the empirical closest class for display");
+
+  // Missing lower bound: doesn't block a match on the upper bound alone.
+  const boundsNoLower = { onlyUpper: { upper: "O(n)", lower: null } };
+  const mNoLower = matchKnownVariants({ worst: linear, best: constant }, roles, boundsNoLower, TIERS.wall.tol);
+  ok(mNoLower.matches.includes("onlyUpper"), "a variant with no declared lower bound can still match on upper alone");
+
+  // A variant with no declared upper bound at all is skipped entirely (not a match, not counted as a refutation).
+  const boundsNoUpper = { undeclared: { upper: null, lower: "O(1)" } };
+  const mNoUpper = matchKnownVariants({ worst: linear, best: constant }, roles, boundsNoUpper, TIERS.wall.tol);
+  ok(!mNoUpper.matches.includes("undeclared") && mNoUpper.perVariant.undeclared.skipped, "a variant with no declared upper bound is skipped, not falsely matched or refuted");
+}
+
+// --- build.mjs's manifest complexity parsing feeds the corpus this ties
+// into: confirm 002-two-sum's baked WAT complexity actually distinguishes
+// brute-force (O(n^2)) from clean/optimized (O(n)) end to end, since this
+// exact mismatch (declaring one bound per problem, not per variant) was
+// the reported gap that motivated this feature. ------------------------
+{
+  const fs = await import("node:fs");
+  const corpus = JSON.parse(fs.readFileSync(new URL("./problems.generated.json", import.meta.url), "utf8"));
+  const p = corpus.problems.find((x) => x.id === "002-two-sum");
+  ok(!!p, "002-two-sum is present in the baked corpus");
+  const wat = p.languages.wat.complexity;
+  ok(wat["brute-force"].upper === "O(n^2)", "baked corpus: WAT brute-force declares O(n^2)");
+  ok(wat.clean.upper === "O(n)" && wat.optimized.upper === "O(n)", "baked corpus: WAT clean and optimized both declare O(n)");
+  const js = p.languages.javascript.complexity;
+  ok(js.clean.upper === "O(n)" && js.optimized.upper === "O(n)", "baked corpus: JS (via the default fallback, no per-language override) declares O(n) for clean/optimized");
+}
+
 console.log(`lab-engine battery: ${n}/${n} passed`);
+
+
