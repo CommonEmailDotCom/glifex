@@ -16,6 +16,35 @@
 // switch (from clearResults); this module owns #lab-btn and the #lab panel.
 
 const GlifexLab = (() => {
+  // This script's OWN version suffix, read from its <script src="lab.js?v=SHA">
+  // tag (stamped at deploy time -- see web/stamp.mjs). document.currentScript
+  // is only reliable during this synchronous, top-level IIFE execution -- it
+  // must be captured HERE, not later inside open()/analyze(), which run on
+  // user interaction long after this script has finished its initial pass.
+  //
+  // Needed because the dynamic imports below (E = await import(...)) request
+  // a hardcoded, unversioned path -- unlike every <script src="..."> tag,
+  // which gets a fresh ?v=<sha> on every deploy (forcing a cache miss and a
+  // guaranteed-fresh fetch), a plain import("./lab-engine.mjs") requests the
+  // EXACT SAME URL on every deploy, so the service worker's stale-while-
+  // revalidate strategy can keep serving a cached, pre-deploy lab-engine.mjs
+  // indefinitely even after lab.js itself (correctly versioned) has updated.
+  // Confirmed as a real, live-site bug: E.matchKnownVariants (added in the
+  // per-variant-bounds deploy) was undefined for visitors whose browser had
+  // lab-engine.mjs cached from before that deploy -- but only on the
+  // no-reveal code path that actually calls it; E.judge (present in both the
+  // old and new lab-engine.mjs) kept working fine on the revealed path,
+  // which is exactly why it looked like a mode-specific bug rather than a
+  // stale-file one. Appending the SAME suffix to these imports makes them
+  // request a freshly-versioned URL on every deploy too, same as any other
+  // script.
+  const VERSION_SUFFIX = (() => {
+    const src = document.currentScript && document.currentScript.src;
+    if (!src) return "";
+    const q = src.indexOf("?");
+    return q === -1 ? "" : src.slice(q);
+  })();
+
   let E = null, C = null;              // lab-engine.mjs / lab-config.mjs (lazy ESM)
   let ctx = null;                      // { p, lang } for the visible button
   let running = false;
@@ -44,7 +73,7 @@ const GlifexLab = (() => {
     panel.hidden = false;
     running = true;
     try {
-      if (!E) { E = await import("./lab-engine.mjs"); C = await import("./lab-config.mjs"); }
+      if (!E) { E = await import("./lab-engine.mjs" + VERSION_SUFFIX); C = await import("./lab-config.mjs" + VERSION_SUFFIX); }
       await analyze(ctx.p, ctx.lang, panel);
     } catch (e) {
       panel.innerHTML = card(`<div class="lab-verdict bad">Lab error: ${esc((e && e.message) || e)}</div>`);
