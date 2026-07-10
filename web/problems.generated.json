@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-10T20:27:21.916Z",
+  "generatedAt": "2026-07-10T22:08:28.257Z",
   "displayNames": {
     "asm-6502": "6502 assembly",
     "i8080": "Intel 8080 assembly",
@@ -211,7 +211,7 @@
           }
         },
         "javascript": {
-          "practice": "module.exports = function solve(c) {\n  return [...c.s].sort().join(\"\") === [...c.t].sort().join(\"\");\n};\n",
+          "practice": "// TEMPORARY -- INTENTIONAL BREAKAGE for CI/CD verification.\n// Deliberately wrong return value so `playground` (which runs this\n// exact file against 001's real test cases) genuinely fails, the\n// same way the actual incident did. Purpose: confirm the Deploy\n// Pages workflow_run gate (see .github/workflows/pages.yml) actually\n// blocks deployment when this merges to main with CI red, replaying\n// the original bug's merge pattern (branch protection's \"skipped =\n// passed\" loophole, not yet closed in Settings > Branches at time of\n// this test). REVERT THIS FILE once Deploy Pages is confirmed to\n// have NOT fired for this merge -- see the accompanying revert\n// script delivered alongside this one.\nmodule.exports = function solve(c) {\n  return false;\n};\n\n",
           "clean": "module.exports = function solve(c) {\n  return [...c.s].sort().join(\"\") === [...c.t].sort().join(\"\");\n};\n",
           "optimized": "module.exports = function solve(c) {\n  if (c.s.length !== c.t.length) return false;\n  const count = {};\n  for (const ch of c.s) count[ch] = (count[ch] || 0) + 1;\n  for (const ch of c.t) { if (!count[ch]) return false; count[ch]--; }\n  return true;\n};\n",
           "brute-force": null,
