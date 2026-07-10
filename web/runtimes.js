@@ -417,12 +417,36 @@ const Runtimes = (() => {
     const { init, Wasmer, Directory } = await import("./vendor/c/index.mjs");
     await init();   // loads the sibling wasmer_js_bg.wasm (vendored) -- offline
     const webc = new Uint8Array(await (await fetch("vendor/c/clang.webc")).arrayBuffer());
-    const clang = await Wasmer.fromFile(webc);   // ~100MB, loaded once per session
+    // webc (the raw bytes) is cached here, loaded once per session -- but
+    // NOT the compiled `clang` module itself. Confirmed directly (repro:
+    // Analyze/Run C once, wait for it to FULLY finish, run it again --
+    // hangs every time, no concurrency or overlapping calls involved):
+    // Wasmer's entrypoint.run() behaves like a single-use process
+    // invocation, not a reusable one. A second call on the SAME compiled
+    // module instance hangs the underlying WASM instance indefinitely --
+    // and since a hung `clang` here is cached and reused for every future
+    // caller (see runtimes.js's module-level cache in Runtimes.get),
+    // every subsequent Run or Analyze for ANY language hangs too, matching
+    // the originally reported "breaks badly... stops working for all
+    // languages until a hard refresh." An earlier fix added a mutual-
+    // exclusion lock between Run and Analyze on the assumption that
+    // OVERLAPPING calls were the trigger; that lock is still correct and
+    // worth keeping (real concurrency risk exists and is now prevented),
+    // but confirmed NOT sufficient on its own -- the hang persisted even
+    // strictly sequentially. This is the actual fix: never reuse a
+    // `clang` instance across calls at all. Costs re-instantiating the
+    // module (from the already-cached bytes, not a repeated ~100MB
+    // network fetch) on every C run instead of just the first -- a real
+    // trade-off, but far better than a hang requiring a hard refresh.
+    // Mirrors the pattern already used a few lines below for `prog` (the
+    // compiled user program), which was ALREADY being freshly
+    // instantiated per call without issue.
     return {
       async run(source, cases, lang) {
         const L = lang || {};
         const sup = L.support || {};
         try {
+          const clang = await Wasmer.fromFile(webc);   // fresh instance every call -- see comment above
           // One Directory mounted at "/": test_cases.json at the root and sources
           // under /c, run with cwd /c so the harness's "../test_cases.json"
           // resolves to /test_cases.json whether or not cwd is honored.
