@@ -112,8 +112,31 @@ test("Complexity Lab renders a verdict card (JavaScript, Nth Fibonacci, revealed
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await page.locator("#lab-btn").click();
     await expect(verdicts.first()).toBeVisible({ timeout: 60000 });
-    await expect(verdicts.first()).toContainText(/Upper bound O\(n\)|Inconclusive/, { timeout: 60000 });
-    text = await verdicts.first().textContent();
+    // Join only the .lab-verdict elements' text -- NOT the whole #lab
+    // panel, and NOT verdicts.first() alone. Two real bugs, both caught
+    // by real CI runs, motivate this exact shape:
+    //   1. verdicts.first() alone: "revealed" mode's own leading line
+    //      ("Testing against the revealed '<variant>'...", added right
+    //      after the render() branch split) is verdicts.first() itself,
+    //      pushing the actual "Upper bound O(n)..." verdict to a LATER
+    //      .lab-verdict element -- waiting on only the first one timed
+    //      out forever, since that text never appears there.
+    //   2. The whole #lab panel's text (tried as the first fix): the
+    //      footer note ("...&ldquo;consistent&rdquo; only means this run
+    //      failed to refute...") is ALWAYS present regardless of the
+    //      actual verdict, so checking against the full panel text would
+    //      make expect(text).toMatch(/consistent/i) a false-green even
+    //      on a genuine REFUTED result.
+    // Joining just the .lab-verdict elements avoids both: every real
+    // verdict line is included, the footer note (a <p>, not a
+    // .lab-verdict div) is not.
+    const allVerdicts = () => page.locator("#lab .lab-verdict").allTextContents();
+    await page.waitForFunction(() => {
+      const els = document.querySelectorAll("#lab .lab-verdict");
+      const joined = Array.from(els).map((e) => e.textContent).join(" ");
+      return /Upper bound O\(n\)|Inconclusive/.test(joined);
+    }, null, { timeout: 60000 });
+    text = (await allVerdicts()).join(" ");
     const summary = summarize(text);
     // Empty step body -- this call exists solely to record a step name
     // Playwright's reporters will show, not to perform an action.
@@ -153,9 +176,15 @@ test("Complexity Lab renders a verdict card (JavaScript, Nth Fibonacci, empirica
     await expect(verdicts.first()).toBeVisible({ timeout: 60000 });
     await expect(verdicts.first()).toContainText(/No solution revealed|Inconclusive/, { timeout: 60000 });
     // The "matches" verdict is a LATER .lab-verdict line, not the first
-    // one (which is always the static "No solution revealed..." intro) --
-    // check the whole panel's text, not just verdicts.first().
-    text = await page.locator("#lab").textContent();
+    // one (which is always the static "No solution revealed..." intro).
+    // Join only the .lab-verdict elements' text, not the whole #lab
+    // panel -- the footer note's own explanatory text happens not to
+    // collide with "Matches known solution type" today, but that's
+    // safety by coincidence of wording, not by design (see the
+    // "revealed" test above, where the equivalent whole-panel check WAS
+    // a real false-green risk against its own footer note).
+    const allVerdicts = () => page.locator("#lab .lab-verdict").allTextContents();
+    text = (await allVerdicts()).join(" ");
     const summary = summarizeMatch(text);
     await test.step(`attempt ${attempt}/${maxAttempts}: ${summary}`, async () => {});
     if (/Matches known solution type/i.test(text)) break;
