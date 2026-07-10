@@ -1,7 +1,7 @@
 // Glifex playground. Consumes problems.generated.json (baked from the same
 // problems/ the CLI uses) so the browser can never drift from the CLI.
 
-var state = { corpus: null, current: null, lang: "javascript", revealed: false };
+var state = { corpus: null, current: null, lang: "javascript", revealed: false, runtimeBusy: false };
 
 // ── rendering ────────────────────────────────────────────────────────
 function $(s) { return document.querySelector(s); }
@@ -10,6 +10,65 @@ function $(s) { return document.querySelector(s); }
 function clearResults() { $("#results").innerHTML = `<div class="hint">Write your solution and press Run.</div>`; if (window.GlifexLab) GlifexLab.sync(state); /* L1-sync */ }
 // loading state: spinner + message during compile/runtime fetch/execution
 function showRunning(res, msg) { res.innerHTML = `<div class="running"><span class="spinner" aria-hidden="true"></span>${msg}</div>`; }
+
+// Shared runtime-call guard. The Run button (below) and the Complexity
+// Lab's Analyze button (web/lab.js) both ultimately drive the SAME
+// cached, shared runtime objects (window.Runtimes.get(lang) -- see
+// runtimes.js's module-level cache, one instance per language for the
+// whole page lifetime). At least one of those (confirmed: C's
+// Wasmer/WASIX compiler) is not safe to invoke while a PREVIOUS call
+// into it is still in flight -- an overlapping call can hang the
+// underlying WASM instance indefinitely. Since the SAME cached instance
+// is reused for every future caller, once that happens every subsequent
+// Run or Analyze for ANY language hangs too -- confirmed directly:
+// mashing the Run button alone reproduces it, no Lab involved, and
+// after it happens the Lab hangs on languages that were never touched.
+// lab.js previously had its OWN "running" flag, checked only against
+// itself -- it had no way to know about the Run button's calls, or vice
+// versa, so the two entry points could still overlap each other. This
+// is the single, shared lock both go through instead.
+//
+// The timeout below is a last-resort safety net, not the primary fix:
+// the LOCK prevents the overlap that -- as far as could be confirmed
+// without direct access to the vendored Wasmer/WASIX source, which
+// isn't checked into this repo -- appears to cause the hang in the
+// first place. Generous on purpose: C's first-ever run downloads a
+// ~100MB toolchain, which can legitimately take a while on a slow
+// connection, and a timeout that fires on a merely-slow-but-working
+// load would be worse than no timeout at all.
+const RUNTIME_TIMEOUT_MS = 120000;
+function setRuntimeButtonsEnabled(enabled) {
+  const runBtn = document.getElementById("run-btn");
+  const labBtn = document.getElementById("lab-btn");
+  if (runBtn) runBtn.disabled = !enabled;
+  if (labBtn) labBtn.disabled = !enabled;
+}
+async function withRuntimeLock(target, fn, renderMsg) {
+  const setMsg = renderMsg || ((el, html) => { el.innerHTML = `<div class="summary bad">${html}</div>`; });
+  if (state.runtimeBusy) {
+    if (target) setMsg(target, "A run is already in progress &mdash; please wait for it to finish before starting another.");
+    return;
+  }
+  state.runtimeBusy = true;
+  setRuntimeButtonsEnabled(false);
+  let timer;
+  try {
+    await Promise.race([
+      fn(),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("GLIFEX_RUNTIME_TIMEOUT")), RUNTIME_TIMEOUT_MS); }),
+    ]);
+  } catch (e) {
+    if (e && e.message === "GLIFEX_RUNTIME_TIMEOUT") {
+      if (target) setMsg(target, `This runtime hasn't responded in ${Math.round(RUNTIME_TIMEOUT_MS / 1000)}s and may be stuck. Other languages should still work normally; if they don't either, refresh the page.`);
+    } else {
+      throw e;
+    }
+  } finally {
+    clearTimeout(timer);
+    state.runtimeBusy = false;
+    setRuntimeButtonsEnabled(true);
+  }
+}
 
 function renderProblemList() {
   const ul = $("#problem-list");
@@ -209,6 +268,10 @@ function runFrontend(p, res) {
 }
 
 async function run() {
+  await withRuntimeLock($("#results"), () => runInner());
+}
+
+async function runInner() {
   const p = state.current;
   const res = $("#results");
   if (p.track === "frontend") { runFrontend(p, res); return; }

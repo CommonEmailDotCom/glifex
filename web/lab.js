@@ -47,7 +47,6 @@ const GlifexLab = (() => {
 
   let E = null, C = null;              // lab-engine.mjs / lab-config.mjs (lazy ESM)
   let ctx = null;                      // { p, lang } for the visible button
-  let running = false;
 
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -67,17 +66,26 @@ const GlifexLab = (() => {
     ctx = ok ? { p, lang: state.lang } : null;
   }
 
+  // Goes through the SAME shared lock (window.withRuntimeLock, defined in
+  // app.js) the Run button uses -- both ultimately drive the same cached
+  // runtime objects (window.Runtimes.get(lang)), and at least one of
+  // those isn't safe to call while a previous invocation is still in
+  // flight. See app.js's withRuntimeLock for the full reasoning; this
+  // used to have its OWN independent "running" flag here, which only
+  // guarded against overlapping with ITSELF -- it had no way to know
+  // about the Run button's calls, or vice versa.
   async function open() {
-    if (!ctx || running) return;
+    if (!ctx) return;
     const panel = $("#lab");
     panel.hidden = false;
-    running = true;
-    try {
-      if (!E) { E = await import("./lab-engine.mjs" + VERSION_SUFFIX); C = await import("./lab-config.mjs" + VERSION_SUFFIX); }
-      await analyze(ctx.p, ctx.lang, panel);
-    } catch (e) {
-      panel.innerHTML = card(`<div class="lab-verdict bad">Lab error: ${esc((e && e.message) || e)}</div>`);
-    } finally { running = false; }
+    await withRuntimeLock(panel, async () => {
+      try {
+        if (!E) { E = await import("./lab-engine.mjs" + VERSION_SUFFIX); C = await import("./lab-config.mjs" + VERSION_SUFFIX); }
+        await analyze(ctx.p, ctx.lang, panel);
+      } catch (e) {
+        panel.innerHTML = card(`<div class="lab-verdict bad">Lab error: ${esc((e && e.message) || e)}</div>`);
+      }
+    }, (el, html) => { el.innerHTML = card(`<div class="lab-verdict bad">${html}</div>`); });
   }
 
   const progress = (panel, msg) =>
