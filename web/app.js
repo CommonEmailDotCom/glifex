@@ -170,9 +170,40 @@ function syncReference() {
   if (!panel.hidden) showReference(state.refVariant || "optimized");
 }
 
+// C-specific: clean.c/optimized.c carry a leading `#define solve
+// __glifex_ref_<variant>` line that renames their own symbol at compile
+// time. Baked into the FILE itself (not applied as a separate
+// pre-processing step) because both compile paths need it: the CLI's
+// test_cmd is a plain `gcc ... *.c` glob with no pre-processing stage,
+// and the browser's c-worker.js writes this same file content directly
+// too -- there's no single shared place to inject the rename at
+// runtime for both.
+//
+// Every caller that uses L.clean/L.optimized as literal SOURCE TEXT
+// (not just as the file c-worker.js writes to /c/clean.c or
+// /c/optimized.c, where the rename is supposed to stay) needs this
+// stripped first -- not just the reference panel's display. Missing
+// that once already caused a real bug: compareOptimized() below reads
+// the same raw L.optimized and passes it as the PRACTICE slot's source
+// to test the reference solution's own performance -- with the rename
+// directive still attached, that source and c-worker.js's own
+// /c/optimized.c write would BOTH rename their "solve" to the same
+// target, reintroducing a fresh collision instead of the one this was
+// meant to fix. One shared function so future call sites don't have to
+// remember this on their own.
+function stripCRename(src) {
+  return String(src || "").replace(/^#define solve __glifex_ref_\w+\n/, "");
+}
+
 function showReference(variant) {
   state.refVariant = variant;
-  const src = currentSource(variant) || "(no reference for this variant)";
+  let src = currentSource(variant) || "(no reference for this variant)";
+  // Display-only: the user should see clean, readable "solve"-named
+  // code, and critically, copying that displayed text must NOT also
+  // copy the rename directive -- if it did, pasting the copied code
+  // into practice.c would rename the user's OWN "solve" function too,
+  // reintroducing exactly the bug this whole change fixes.
+  if (state.lang === "c") src = stripCRename(src);
   $("#reference-code").value = src;
   $("#ref-brute-force").classList.toggle("active", variant === "brute-force");
   $("#ref-clean").classList.toggle("active", variant === "clean");
@@ -225,8 +256,14 @@ function renderResults(out, res, opts = {}) {
 
 async function compareOptimized(userOut, res) {
   const p = state.current;
-  const src = (p.languages[state.lang] || {}).optimized;
+  let src = (p.languages[state.lang] || {}).optimized;
   if (!src) return;
+  // Same C-specific strip as showReference() (see stripCRename's own
+  // comment) -- src here becomes the PRACTICE slot's source text, not
+  // just display text, so leaving the rename directive attached would
+  // rename ITS "solve" to the same target c-worker.js's own
+  // /c/optimized.c write already uses, colliding with itself.
+  if (state.lang === "c") src = stripCRename(src);
   let refOut;
   if (state.lang === "javascript") refOut = GlifexJsRuntime.runJavaScript(src, p.cases);
   else {

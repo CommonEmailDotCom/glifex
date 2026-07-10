@@ -1,6 +1,7 @@
+#define solve __glifex_ref_clean
 #include "solution.h"
 
-JVal *clean(JVal *c) {
+JVal *solve(JVal *c) {
     JVal *nums = jget(c, "nums");
     double target = jget(c, "target")->num;
     for (int i = 0; i < nums->n; i++)

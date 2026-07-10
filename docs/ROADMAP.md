@@ -86,8 +86,8 @@ Live edit-compile-run for every remaining corpus language, in the browser — la
         occurs occasionally even so -- other runs and languages are
         unaffected afterward, and re-running the same attempt often
         succeeds. Observed correlation, not yet root-caused: not seen on
-        001 (Nth Fibonacci -- scalar, O(1) memory); seen intermittently
-        on 002 (Two Sum -- array/hash-map-based, materially more memory
+        001 (Anagram Detection -- fixed-size character-count scan); seen
+        intermittently on 002 (Two Sum -- array/hash-map-based, materially more memory
         and data movement). Consistent with independently-reported
         instability in this exact SDK version doing similar in-browser
         clang/LLVM work elsewhere. Diagnostic breadcrumb logging (stage

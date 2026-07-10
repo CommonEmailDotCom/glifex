@@ -3,9 +3,17 @@
 #include "solution.h"
 #include <time.h>
 
-JVal *practice(JVal *c);
-JVal *clean(JVal *c);
-JVal *optimized(JVal *c);
+/* Practice slot: the same "solve" name every language in this Lab uses
+   -- see solution.h's own contract comment. clean.c/optimized.c ALSO
+   define "solve" (matching that same convention, so the reference panel
+   shows clean, copyable code) but rename their OWN symbol away from the
+   bare name via a `#define solve __glifex_ref_<variant>` line at the top
+   of each file, so all three can be compiled and linked together
+   without colliding -- practice.c's real, unrenamed "solve" is the only
+   one left with that name in the final binary. */
+JVal *solve(JVal *c);
+JVal *__glifex_ref_clean(JVal *c);
+JVal *__glifex_ref_optimized(JVal *c);
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -20,8 +28,8 @@ int main(int argc, char **argv) {
     const char *variant = argc > 1 ? argv[1] : "practice";
     int bench = argc > 2 && !strcmp(argv[2], "--bench");
     JVal *cases = json_parse(read_file("../test_cases.json"));
-    JVal *(*fn)(JVal *) = !strcmp(variant, "practice") ? practice
-                        : !strcmp(variant, "clean") ? clean : optimized;
+    JVal *(*fn)(JVal *) = !strcmp(variant, "practice") ? solve
+                        : !strcmp(variant, "clean") ? __glifex_ref_clean : __glifex_ref_optimized;
     if (bench) {
         double best = 1e18;
         for (int r = 0; r < 5; r++) {

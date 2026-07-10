@@ -29,18 +29,47 @@
  * intermittent failures still occur (an uncaught "unreachable" trap, or
  * unrelated-looking clang/lld linker failures), now correctly isolated
  * to a single run instead of poisoning everything after it. Observed
- * correlation, not yet root-caused: not seen on 001 (Nth Fibonacci,
- * scalar, O(1) memory); seen intermittently on 002 (Two Sum,
- * array/hash-map-based -- materially more memory and data movement).
- * See docs/ROADMAP.md's Bx-3 known-issue note.
+ * correlation, not yet root-caused: not seen on 001 (Anagram Detection,
+ * a fixed-size character-count scan); seen intermittently on 002 (Two
+ * Sum, array/hash-map-based -- materially more memory and data
+ * movement). See docs/ROADMAP.md's Bx-3 known-issue note.
  *
- * The `stage` breadcrumb below exists specifically to test that
- * correlation further: every console line and every error report
- * includes both the current stage AND the source/case sizes, so a
- * future occurrence shows not just "it crashed" but "it crashed while
- * compiling, with N bytes of source and M test cases" -- letting a
- * pattern emerge from real occurrences instead of guessing from one
- * data point. Wasmer's own initializeLogger("debug") (see
+ * Separately: every C source file (practice.c, clean.c, optimized.c)
+ * now defines a function named "solve" -- the same convention every
+ * OTHER language in this Lab already uses (Python/Rust/WAT: literally
+ * always "solve"; Java/C#: a class per variant, but always a "solve"/
+ * "Solve" method via a shared interface). C used to be the outlier,
+ * requiring differently-named functions per variant (practice/clean/
+ * optimized) purely because C has neither classes nor namespaces to
+ * lean on the way those other languages do -- which meant copying a
+ * revealed solution into the editor to experiment with it (offered
+ * directly by the reference panel's own "copy" button) reliably failed
+ * with a cryptic "duplicate symbol" linker error, since the copied
+ * function's name collided with the separately-compiled reference file
+ * defining the exact same name. clean.c and optimized.c now carry a
+ * leading `#define solve __glifex_ref_<variant>` line that renames
+ * their OWN symbol away from the bare name at compile time -- baked
+ * into the committed file itself (not injected here at runtime),
+ * because the CLI's test_cmd (languages/c.toml) is a plain `gcc ...
+ * *.c` glob with no pre-processing stage, so the rename has to work
+ * without any JS-side help for that path too. web/app.js's
+ * showReference() strips that leading line before display, so what the
+ * reference panel shows -- and what its copy button copies -- is clean,
+ * plain "solve"-named code that can be pasted into the practice editor
+ * and just work. Validated for real: reproduced the original collision
+ * with a native compiler, applied this exact fix, confirmed the
+ * collision is gone, and confirmed the full pipeline via `glifex test`/
+ * `glifex verify` (both problems, all three variants, including
+ * --metrics) -- not just structural review.
+ *
+ * The `stage` breadcrumb below exists specifically to test the
+ * remaining, separate Wasmer-flakiness correlation further: every
+ * console line and every error report includes both the current stage
+ * AND the source/case sizes, so a future occurrence shows not just "it
+ * crashed" but "it crashed while compiling, with N bytes of source and
+ * M test cases" -- letting a pattern emerge from real occurrences
+ * instead of guessing from one data point. Wasmer's own
+ * initializeLogger("debug") (see
  * https://docs.wasmer.io/sdk/wasmer-js/tutorials/run/) is available as
  * a deeper diagnostic layer if this needs another pass -- deliberately
  * not enabled by default here since it's considerably more verbose;
@@ -58,6 +87,48 @@
  * disproportionately inflate small case counts).
  */
 let stage = "not started";   // worker-global (not local to onmessage) so onerror can report it too
+
+// Recognizes one specific, common, and previously-cryptic failure: the
+// harness always compiles practice.c + clean.c + optimized.c together as
+// one program, and each is required to define a top-level function named
+// after its own file (practice/clean/optimized -- see harness.c's forward
+// declarations). If the practice editor's OWN code also defines a function
+// with one of those names -- the natural result of copying a revealed
+// solution in to experiment with it via the reference panel's "copy"
+// button, which copies verbatim, name included -- wasm-ld correctly
+// refuses with "duplicate symbol", but that message gives no hint of why
+// or what to do about it. Confirmed via a real repro: the default
+// practice.c stub (named `practice`) compiles fine; the same code renamed
+// to `clean` (matching a copied reference solution) reliably fails this
+// exact way.
+function friendlyCompileError(stderr) {
+  const s = String(stderr || "");
+  // Missing "solve": the harness's contract (see solution.h) is that
+  // your code defines exactly one function named "solve" -- the same
+  // convention every language in this Lab uses (Python, Rust, WAT, and
+  // Java/C# via a shared interface method all do the same). Regex
+  // covers both GNU ld's `undefined reference to \`solve'` (confirmed
+  // via a real native compile) and wasm-ld's "undefined symbol: X"
+  // convention (confirmed from this project's own duplicate-symbol
+  // wording, which follows that same style) -- untested against the
+  // real WASIX wasm-ld directly (no vendored toolchain in this sandbox),
+  // so this second form is inferred from a consistent naming pattern,
+  // not independently confirmed the way the GNU ld form is.
+  if (/undefined (reference to [`']solve[`']|symbol:\s*solve\b)/.test(s)) {
+    return 'Your code needs a function named "solve" -- the harness looks for exactly that name, matching every language in this Lab. Check that it\'s defined and spelled correctly.';
+  }
+  // Duplicate "solve": should no longer be reachable via the normal
+  // "copied a revealed solution in" path this whole fix targets --
+  // clean.c/optimized.c now rename their OWN "solve" away at compile
+  // time (see the #define at the top of each), so only your code's
+  // "solve" should remain unrenamed in the final link. Kept as a
+  // fallback in case your own code defines "solve" more than once for
+  // some unrelated reason.
+  if (/duplicate symbol:\s*solve\b/.test(s)) {
+    return 'Your code defines "solve" more than once. Each variant should have exactly one solve() function.';
+  }
+  return "compile error";
+}
 
 self.onmessage = async (e) => {
   const d = e.data || {};
@@ -106,8 +177,9 @@ self.onmessage = async (e) => {
     });
     const cres = await comp.wait();
     if (!cres.ok) {
+      const friendly = friendlyCompileError(cres.stderr);
       console.warn(`[glifex-c-worker] compile FAILED -- ${ctx} -- stderr: ${String(cres.stderr || "").trim().slice(0, 300)}`);
-      self.postMessage({ id: "error", error: "compile error", output: String(cres.stderr || "").trim().slice(0, 800) });
+      self.postMessage({ id: "error", error: friendly, output: String(cres.stderr || "").trim().slice(0, 800) });
       return;
     }
 
