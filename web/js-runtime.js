@@ -57,34 +57,49 @@ function measureJsCases(solve, cases, opts) {
       if (cdt < 2) {
         let k = 1;
         while (cdt < 2 && k < 1048576) { k *= 2; const s0 = performance.now(); for (let q = 0; q < k; q++) { sink = solve(cases[i].input); } cdt = performance.now() - s0; }
-        // Median-of-3 at the now-stable k: the single sample that happened
-        // to cross the 2ms threshold is the most contention-fragile
-        // measurement in this whole loop -- exactly the sample most likely
-        // to land astride a GC pause, OS preemption, or (in a Worker)
-        // main-thread/worker scheduling contention on constrained
-        // hardware. Two more passes at the SAME k (the search that found
-        // it already cost ~2k iterations; no need to redo that part)
-        // absorb a single bad draw without materially increasing cost --
-        // each pass is ~2ms by construction, so this adds roughly 4ms per
-        // case, not a multiple of the whole search.
+        // Min-of-5 at the now-stable k, not median: scheduling noise (GC
+        // pauses, OS preemption, or -- confirmed the hard way, via a real
+        // e2e CI failure -- contention from OTHER browser processes
+        // competing for the same limited CPU under Playwright's default
+        // parallelism) is ONE-SIDED -- it can only make a measurement
+        // SLOWER than the true cost, never faster. That's exactly the
+        // same reasoning Python's timeit, and most rigorous
+        // microbenchmarking tooling, use: as long as at least ONE of N
+        // repeated trials is "clean" (uninterrupted), the MINIMUM
+        // observed time converges to the true value. A median or mean
+        // gets dragged upward by ANY interference in ANY sample -- and
+        // with 2+ bad samples out of 3 (confirmed happening under real,
+        // multi-process CI contention), even the median stays corrupted.
+        // Each pass is ~2ms by construction, so 4 extra passes cost
+        // roughly 8ms per case -- still a small, bounded addition.
         const passAtK = () => { const s0 = performance.now(); for (let q = 0; q < k; q++) { sink = solve(cases[i].input); } return performance.now() - s0; };
-        let samples = [cdt, passAtK(), passAtK()].sort((a, b) => a - b);
-        cdt = samples[1];
-        // The search's own exit sample (now one of the three above) could
-        // itself have BEEN the outlier -- inflated by the exact same kind
-        // of hiccup this median is meant to guard against. If so, the
-        // median comes back below the target window, meaning k genuinely
-        // isn't big enough on a fair sample -- keep doubling and
-        // re-measure fresh at each new k rather than trust a value the
-        // search itself wouldn't have accepted going in. Rare in
-        // practice (only fires when that one exit sample was skewed).
-        while (cdt < 2 && k < 1048576) {
+        let best = Math.min(cdt, passAtK(), passAtK(), passAtK(), passAtK());
+        // If even the best of 5 trials is still below the target window,
+        // k genuinely isn't big enough on a fair sample -- the search's
+        // own single-sample exit could itself have been inflated just
+        // enough to cross 2ms early, at a smaller k than a clean
+        // measurement would have needed. Keep doubling and re-measure
+        // fresh (min-of-5 again) at each new k rather than trust a value
+        // the search wouldn't have accepted going in.
+        while (best < 2 && k < 1048576) {
           k *= 2;
-          samples = [passAtK(), passAtK(), passAtK()].sort((a, b) => a - b);
-          cdt = samples[1];
+          best = Math.min(passAtK(), passAtK(), passAtK(), passAtK(), passAtK());
         }
+        cdt = best;
         var tNs = cdt >= 1 ? (cdt * 1e6) / k : null;
-      } else { tNs = cdt * 1e6; }
+      } else {
+        // Same one-sided-noise reasoning as above, lighter touch: this
+        // branch is already the slowest case (>= 2ms on a SINGLE call,
+        // no repeat needed) -- multiplying that cost by 5 would work
+        // against L3's whole point of making larger n affordable to
+        // test. One extra pass (min-of-2, not min-of-5) still catches
+        // the single most likely failure mode -- the ONE existing
+        // sample being the contaminated one -- without materially
+        // increasing cost for what's already the most expensive
+        // measurement in the ladder.
+        const s1 = performance.now(); sink = solve(cases[i].input); const cdt2 = performance.now() - s1;
+        tNs = Math.min(cdt, cdt2) * 1e6;
+      }
       if (sink === measureJsCases) console.log(sink); // unreachable; keeps `sink` observably used
       const ok = JSON.stringify(got) === JSON.stringify(cases[i].expected);
       results.push({ i, ok, got, expected: cases[i].expected, tNs });
