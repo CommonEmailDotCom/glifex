@@ -37,10 +37,10 @@ test.describe("sm83 runtime (real Game Boy assembly, 16-bit result)", () => {
     const result = await page.evaluate(async ({ FIB, ECHO }) => {
       const rt = await window.Runtimes.get("sm83");
       if (!rt) return "no-runtime";
-      const echo = rt.run(ECHO, [{ input: { n: 7 }, expected: 7 }, { input: { n: 42 }, expected: 42 }]);
+      const echo = await rt.run(ECHO, [{ input: { n: 7 }, expected: 7 }, { input: { n: 42 }, expected: 42 }]);
       if (echo.error) return "echo error: " + echo.error;
       if (!echo.results.every((r) => r.ok)) return "echo cases-failed: " + JSON.stringify(echo.results);
-      const fib = rt.run(FIB, [
+      const fib = await rt.run(FIB, [
         { input: { n: 0 }, expected: 0 }, { input: { n: 1 }, expected: 1 },
         { input: { n: 13 }, expected: 233 }, { input: { n: 20 }, expected: 6765 },
       ]);
