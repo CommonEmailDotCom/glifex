@@ -57,6 +57,32 @@ function measureJsCases(solve, cases, opts) {
       if (cdt < 2) {
         let k = 1;
         while (cdt < 2 && k < 1048576) { k *= 2; const s0 = performance.now(); for (let q = 0; q < k; q++) { sink = solve(cases[i].input); } cdt = performance.now() - s0; }
+        // Median-of-3 at the now-stable k: the single sample that happened
+        // to cross the 2ms threshold is the most contention-fragile
+        // measurement in this whole loop -- exactly the sample most likely
+        // to land astride a GC pause, OS preemption, or (in a Worker)
+        // main-thread/worker scheduling contention on constrained
+        // hardware. Two more passes at the SAME k (the search that found
+        // it already cost ~2k iterations; no need to redo that part)
+        // absorb a single bad draw without materially increasing cost --
+        // each pass is ~2ms by construction, so this adds roughly 4ms per
+        // case, not a multiple of the whole search.
+        const passAtK = () => { const s0 = performance.now(); for (let q = 0; q < k; q++) { sink = solve(cases[i].input); } return performance.now() - s0; };
+        let samples = [cdt, passAtK(), passAtK()].sort((a, b) => a - b);
+        cdt = samples[1];
+        // The search's own exit sample (now one of the three above) could
+        // itself have BEEN the outlier -- inflated by the exact same kind
+        // of hiccup this median is meant to guard against. If so, the
+        // median comes back below the target window, meaning k genuinely
+        // isn't big enough on a fair sample -- keep doubling and
+        // re-measure fresh at each new k rather than trust a value the
+        // search itself wouldn't have accepted going in. Rare in
+        // practice (only fires when that one exit sample was skewed).
+        while (cdt < 2 && k < 1048576) {
+          k *= 2;
+          samples = [passAtK(), passAtK(), passAtK()].sort((a, b) => a - b);
+          cdt = samples[1];
+        }
         var tNs = cdt >= 1 ? (cdt * 1e6) / k : null;
       } else { tNs = cdt * 1e6; }
       if (sink === measureJsCases) console.log(sink); // unreachable; keeps `sink` observably used

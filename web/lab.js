@@ -47,6 +47,22 @@ const GlifexLab = (() => {
 
   let E = null, C = null;              // lab-engine.mjs / lab-config.mjs (lazy ESM)
   let ctx = null;                      // { p, lang } for the visible button
+  // L3 (docs/ROADMAP.md): the JS runtime used to execute directly on the
+  // main thread here, same as every language except C/C++ -- a runaway
+  // solve() (infinite loop, or just much slower than intended at a large
+  // tested n) would freeze the whole tab, since the Lab's own measurement
+  // loop WAS the main thread's only work at that moment. Spawned lazily by
+  // runJsInWorker() (one per analyze() call, reused across every runOnce()
+  // within it -- JS has no single-use-instance constraint the way Wasmer's
+  // WASIX runtime does, confirmed the hard way this session for C, so
+  // reuse across a session is fine here unlike c-worker.js's per-call
+  // spawn). Always terminated in open()'s own finally below, NOT inside
+  // analyze() itself -- analyze() has many early-return paths (correctness
+  // failures, missing runtimes, inconclusive verdicts, and more), and
+  // hanging cleanup off every one of them individually would be exactly
+  // the kind of thing that's easy to miss on the next new early return
+  // someone adds. One place, always runs.
+  let jsLabWorker = null;
 
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -84,6 +100,8 @@ const GlifexLab = (() => {
         await analyze(ctx.p, ctx.lang, panel);
       } catch (e) {
         panel.innerHTML = card(`<div class="lab-verdict bad">Lab error: ${esc((e && e.message) || e)}</div>`);
+      } finally {
+        if (jsLabWorker) { jsLabWorker.terminate(); jsLabWorker = null; }
       }
     }, (el, html) => { el.innerHTML = card(`<div class="lab-verdict bad">${html}</div>`); });
   }
@@ -117,6 +135,46 @@ const GlifexLab = (() => {
     return { boundMode: "legacy", declared: cfgDeclared };
   }
 
+  // L3 worker-per-run-of-a-session helper for JS (see jsLabWorker's own
+  // comment above for the reasoning). One JS-side timeout per call --
+  // NOT the same thing as the outer app-level withRuntimeLock timeout
+  // (2 minutes, covers the WHOLE Run/Analyze call): this one is scoped
+  // to a single runOnce() -- one full (mode x size) plan's worth of
+  // cases, not the whole multi-rep analysis -- so a hang gets caught
+  // and reported well before the outer timeout would even notice
+  // something's wrong, and specifically identifies "your code" as the
+  // likely cause rather than a generic stuck-runtime message.
+  const JS_LAB_TIMEOUT_MS = 20000;
+  async function runJsInWorker(source, cases) {
+    if (!jsLabWorker) jsLabWorker = new Worker("js-lab-worker.js");
+    const worker = jsLabWorker;
+    try {
+      const res = await Promise.race([
+        new Promise((resolve, reject) => {
+          const cleanup = () => { worker.removeEventListener("message", onmsg); worker.removeEventListener("error", onerr); };
+          const onmsg = (e) => { cleanup(); resolve(e.data || {}); };
+          const onerr = (e) => { cleanup(); reject(new Error(String((e && e.message) || e))); };
+          worker.addEventListener("message", onmsg);
+          worker.addEventListener("error", onerr);
+          worker.postMessage({ id: "measure", source, cases });
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Your code took too long to finish (over 20s) -- likely an infinite loop or a much slower algorithm than expected at this input size.")), JS_LAB_TIMEOUT_MS)),
+      ]);
+      if (res.id === "error") return { error: res.error };
+      return { results: res.results, nsPerCase: res.nsPerCase };
+    } catch (e) {
+      // A genuinely stuck worker (the timeout branch above, or an
+      // uncaught crash) needs a FRESH worker for the next runOnce() --
+      // this one may still be wedged. Terminate and clear so the next
+      // call in this same analyze() lazily spawns a clean one, rather
+      // than reusing something that might still be stuck.
+      worker.terminate();
+      if (jsLabWorker === worker) jsLabWorker = null;
+      return { error: String((e && e.message) || e) };
+    }
+  }
+
   async function analyze(p, lang, panel) {
     const cfg = C.PROBLEMS[p.id];
     if (!cfg) return void (panel.innerHTML = card('<div class="lab-verdict dim">This problem has no input-family generators yet (web/lab-config.mjs) &mdash; the Lab needs authored best/adversarial families to say anything honest.</div>'));
@@ -144,7 +202,7 @@ const GlifexLab = (() => {
     const runner = lang === "javascript" ? "js" : await window.Runtimes.get(lang);
     if (!runner) return void (panel.innerHTML = card(`<div class="lab-verdict bad">Runtime for ${esc(lang)} is not available${window.Runtimes.error(lang) ? ": " + esc(window.Runtimes.error(lang)) : ""}.</div>`));
     const runOnce = async (cases) => runner === "js"
-      ? window.GlifexJsRuntime.runJavaScript(source, cases)
+      ? await runJsInWorker(source, cases)
       : await runner.run(source, cases, p.languages[lang]);
 
     const probePlan = C.buildPlan(cfg, "wall", lang, "probe").plan.slice(0, 1);
