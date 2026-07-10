@@ -73,8 +73,16 @@ const Runtimes = (() => {
   // call worker (what C specifically needs, confirmed the hard way this
   // session -- Wasmer's entrypoint.run() behaves like a single-use
   // process invocation, so reusing one across calls hangs).
-  async function callWorker(state, scriptUrl, message, timeoutMs, timeoutMessage) {
-    if (!state.worker) state.worker = new Worker(scriptUrl);
+  //
+  // `workerOptions` (optional, passed straight through to `new
+  // Worker(scriptUrl, workerOptions)`) is what makes "mostly
+  // configuration" literally true for the retro CPU cores: they're
+  // genuine ES modules (`export class Cpu6502`), which importScripts()
+  // -- what a classic-script worker like js-lab-worker.js or c-worker.js
+  // uses -- can't load. Passing `{ type: "module" }` here is the entire
+  // difference; nothing else about the call changes.
+  async function callWorker(state, scriptUrl, message, timeoutMs, timeoutMessage, workerOptions) {
+    if (!state.worker) state.worker = new Worker(scriptUrl, workerOptions);
     const worker = state.worker;
     try {
       return await Promise.race([
@@ -612,152 +620,40 @@ const Runtimes = (() => {
   function makeRetroLoader(cfg) {
     return async function loadRetro() {
       if (!(await vendored("asm-6502"))) return null;   // all tracks share customasm.wasm
-      const casm = (await WebAssembly.instantiate(
-        await (await fetch("vendor/asm-6502/customasm.wasm")).arrayBuffer()
-      )).instance.exports;
-      const core = (await import(cfg.coreModule))[cfg.coreExport];
-      const rres = await fetch(cfg.ruledefPath);
-      const RULEDEF = rres.ok ? await rres.text() : "";
-      const RULEDEF_OK = RULEDEF.includes(cfg.ruledefMarker);
-      // Prepend the instruction set + origin so users write PLAIN assembly (no
-      // #ruledef/#addr). #bankdef puts labels at `entry` with output at byte 0.
-      const PREAMBLE = RULEDEF + "\n#bankdef prog { #addr " + cfg.entry + ", #outp 0 }\n#bank prog\n";
-      const enc = new TextEncoder(), dec = new TextDecoder();
-      const mkStr = (str) => { const b = enc.encode(str); const q = casm.wasm_string_new(b.length); for (let i = 0; i < b.length; i++) casm.wasm_string_set_byte(q, i, b[i]); return q; };
-      const rdStr = (q) => { const n = casm.wasm_string_get_len(q); const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = casm.wasm_string_get_byte(q, i); return dec.decode(o); };
-      function assemble(source) {
-        const fp = mkStr("hexstr"), ap = mkStr(PREAMBLE + source), op = casm.wasm_assemble(fp, ap);
-        const text = rdStr(op);
-        casm.wasm_string_drop(fp); casm.wasm_string_drop(ap); casm.wasm_string_drop(op);
-        // STRICT parse: the hexstr payload is line(s) of pure hex. Extract hex
-        // ONLY from lines that are entirely hex -- never strip letters out of
-        // diagnostics (words like "resolved"/"error" contain a-f and corrupt).
-        const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
-        const hex = clean.split("\n").map((l) => l.trim()).filter((l) => l && /^[0-9a-fA-F]+$/.test(l)).join("");
-        if (!hex || hex.length % 2) {
-          // ALWAYS a non-empty, verbose error: include the raw assembler output
-          // so failures diagnose themselves in the UI instead of crashing.
-          const raw = clean.trim();
-          if (!raw) return { error: "program assembled to 0 bytes -- did you write any instructions? (comments alone produce no code)" };
-          return { error: raw.slice(0, 800) };
-        }
-        const bytes = new Uint8Array(hex.length / 2);
-        for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-        return { bytes };
-      }
+      // L3: assembly + emulation moved off the main thread into
+      // retro-worker.js -- a genuinely runaway program (an
+      // unconditional jump-to-self, or code that runs past maxSteps
+      // before the existing runaway check catches it) used to be able
+      // to freeze the tab the same way an unprotected JS solve() could.
+      // See retro-worker.js's own header comment for the fuller
+      // reasoning, including why 6502/SM83's fallback wall-clock timing
+      // (i8080 has real cycle counts; they don't yet) is a structural
+      // similarity to JS's old noise pattern worth being aware of, not
+      // a confirmed problem for retro -- that's explicitly out of scope
+      // for this specific change.
+      //
+      // One persistent worker per LANGUAGE (this closure's own cfg),
+      // not shared across 6502/SM83/i8080 -- each is its own,
+      // independent { worker: null } state, matching how each already
+      // gets its own entry in LOADERS below. Module worker ({ type:
+      // "module" }), not classic: the CPU cores are genuine ES modules,
+      // which importScripts() (what the classic-script workers use)
+      // can't load.
+      const retroWorkerState = { worker: null };
+      const RETRO_TIMEOUT_MS = 20000;
       return {
-        run(source, cases) {
-          if (!RULEDEF_OK) return { error: cfg.name + " ruledef failed to load (" + cfg.ruledefPath + " missing or invalid) -- try a hard refresh; if it persists, the deploy is incomplete." };
-          const asm = assemble(source);
-          if (!asm.bytes) return { error: cfg.name + " assembly error: " + (asm.error || "unknown (no bytes, no message)") };
-          // Fit-verifier: the program image must not collide with the I/O
-          // region or run off the address space (RETRO-CONTRACT).
-          const progEnd = cfg.entry + asm.bytes.length;
-          const ioStart = Math.min(cfg.inAddr, cfg.outAddr);
-          if (progEnd > 0x10000) return { error: cfg.name + ": program is " + asm.bytes.length + " bytes -- runs past the top of the 64K address space from entry 0x" + cfg.entry.toString(16) };
-          if (cfg.entry < ioStart && progEnd > ioStart) return { error: cfg.name + ": program is " + asm.bytes.length + " bytes -- collides with the I/O region at 0x" + ioStart.toString(16) + " (max " + (ioStart - cfg.entry) + " bytes)" };
-          let totalInsns = 0, totalCycles = 0, hasCycles = false, peakSpace = 0;
-          const results = cases.map((c, i) => {
-            const vals = Array.isArray(c.input) ? c.input : Object.values(c.input);
-            // RAM allocated ONCE per case (not per repeat): the previous
-            // design allocated a fresh 64KB array on EVERY runOnce() call,
-            // including every repeat during wall-clock timing. Measured
-            // directly: that allocation alone was 83-92% of the total
-            // measured time for a program this small -- the real O(n)
-            // signal (tens of ns/step) was completely buried under a
-            // ~17-20us fixed cost, which is exactly why growth measured
-            // as flat/O(1) even though the algorithm is genuinely O(n).
-            // Fix: allocate once, track exactly which addresses each
-            // execution writes (`touched`), and reset only those before
-            // the next run -- correctness verified across repeats (a
-            // program that writes garbage into `touched` addresses on a
-            // later run would still be caught by the correctness check
-            // on the FIRST run, which is what's actually compared against
-            // the oracle; only subsequent repeats, used for timing only,
-            // rely on the reset being complete, which it is by
-            // construction: every write goes through `touched`).
-            const ram = new Uint8Array(0x10000);
-            asm.bytes.forEach((b, k) => (ram[(cfg.entry + k) & 0xffff] = b));
-            vals.forEach((v, k) => (ram[(cfg.inAddr + k) & 0xffff] = v & 0xff));
-            let touched = [];
-            function runOnce() {
-              for (const a of touched) ram[a] = 0;
-              touched = [];
-              const bus = {
-                read: (a) => ram[a & 0xffff],
-                write: (a, v) => { const addr = a & 0xffff; ram[addr] = v & 0xff; touched.push(addr); },
-                readWord: (a) => ram[a & 0xffff] | (ram[(a + 1) & 0xffff] << 8),
-              };
-              const cpu = new core(bus);
-              cpu.pc = cfg.entry;
-              if (cfg.initSp !== undefined) cpu.sp = cfg.initSp;
-              let steps = 0;
-              while (!cpu.halted) {
-                if (steps++ > cfg.maxSteps) throw new Error("runaway (no " + cfg.haltName + ")");
-                cpu.step();
-              }
-              const got = ram[cfg.outAddr & 0xffff] | (ram[(cfg.outAddr + 1) & 0xffff] << 8);   // u16 LE result
-              const space = new Set(touched.filter((a) => a < cfg.entry || a >= progEnd)).size;
-              return { got, insns: steps, space, cycles: typeof cpu.cycles === "number" ? cpu.cycles : null };
-            }
-            let first;
-            try {
-              first = runOnce();
-            } catch (e) {
-              return { i, ok: false, error: String((e && e.message) || e), expected: c.expected };
-            }
-            if (first.space > peakSpace) peakSpace = first.space;
-            totalInsns += first.insns;
-            if (first.cycles != null) { totalCycles += first.cycles; hasCycles = true; }
-            // L1-retro-rows: per-case exact samples for the Complexity Lab.
-            const row = { i, ok: eq(first.got, c.expected), got: first.got, expected: c.expected, insns: first.insns, space: first.space };
-            if (first.cycles != null) {
-              row.cycles = first.cycles;
-            } else {
-              // No cycle counter on this core (e.g. SM83 -- "6502/SM83
-              // coarse until Harte parity", see ROADMAP): the Lab's tier
-              // probe falls through to wall-tier and asks for tNs on
-              // every case. Without this, EVERY case came back with no
-              // timing field at all, and the Lab reported "Inconclusive:
-              // N of N measurements came back below timing resolution"
-              // every single time -- not a resolution problem, a
-              // genuinely missing measurement. Adaptive-repeat wall-clock
-              // timing, mirroring caseLoop's exact thresholds (see that
-              // function, above) for consistency with every other wall-
-              // tier language.
-              const c0 = performance.now();
-              let cdt = performance.now() - c0;
-              if (cdt < 2) {
-                let k = 1;
-                while (cdt < 2 && k < 1048576) {
-                  k *= 2;
-                  const s0 = performance.now();
-                  for (let q = 0; q < k; q++) runOnce();
-                  cdt = performance.now() - s0;
-                }
-                row.tNs = cdt >= 1 ? (cdt * 1e6) / k : null;
-              } else {
-                row.tNs = cdt * 1e6;
-              }
-            }
-            return row;
-          });
-          const insnsPerCase = cases.length ? totalInsns / cases.length : 0;
-          const out = { results, instructions: Math.round(insnsPerCase), codeBytes: asm.bytes.length, spaceBytes: peakSpace };
-          if (hasCycles && cfg.clockHz) {
-            // True per-instruction cycle totals (input-dependent conditional
-            // timing included) at the ISA's reference clock.
-            const cyclesPerCase = cases.length ? totalCycles / cases.length : 0;
-            out.cycles = Math.round(cyclesPerCase);
-            out.nsPerCase = cyclesPerCase * (1e9 / cfg.clockHz);
-            out.clockHz = cfg.clockHz;
-          } else {
-            // TODO(cycle-accuracy): coarse INSTRUCTION count, not true cycles.
-            // 6502/SM83 cycle tables need page-cross/branch/RMW penalties
-            // validated against Tom Harte's SingleStepTests (see docs).
-            out.nsPerCase = insnsPerCase * 1000;
+        async run(source, cases) {
+          try {
+            const res = await window.callWorker(
+              retroWorkerState, "retro-worker.js", { id: "run", cfg, source, cases },
+              RETRO_TIMEOUT_MS, "Your program took too long to finish (over 20s) -- likely a runaway loop (no " + cfg.haltName + ") or code much slower than expected on these inputs.",
+              { type: "module" });
+            if (res.id === "error") return { error: res.error };
+            const { id, ...out } = res;
+            return out;
+          } catch (e) {
+            return { error: String((e && e.message) || e) };
           }
-          return out;
         },
       };
     };
