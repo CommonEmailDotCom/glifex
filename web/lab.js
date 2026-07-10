@@ -62,7 +62,17 @@ const GlifexLab = (() => {
   // hanging cleanup off every one of them individually would be exactly
   // the kind of thing that's easy to miss on the next new early return
   // someone adds. One place, always runs.
-  let jsLabWorker = null;
+  //
+  // { worker: null } shape (not a bare variable) because window.
+  // callWorker (runtimes.js) owns and mutates this object directly --
+  // spawns into state.worker if empty, clears it back to null on a
+  // failed/timed-out call so the next runOnce() spawns fresh rather than
+  // reusing something possibly still wedged. Passing the SAME object
+  // across every runOnce() in one analyze() session is what makes this
+  // the persist-across-calls lifecycle; a language needing C's
+  // fresh-per-call lifecycle instead would just pass a NEW { worker:
+  // null } every time.
+  const jsLabWorkerState = { worker: null };
 
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -101,7 +111,7 @@ const GlifexLab = (() => {
       } catch (e) {
         panel.innerHTML = card(`<div class="lab-verdict bad">Lab error: ${esc((e && e.message) || e)}</div>`);
       } finally {
-        if (jsLabWorker) { jsLabWorker.terminate(); jsLabWorker = null; }
+        if (jsLabWorkerState.worker) { jsLabWorkerState.worker.terminate(); jsLabWorkerState.worker = null; }
       }
     }, (el, html) => { el.innerHTML = card(`<div class="lab-verdict bad">${html}</div>`); });
   }
@@ -135,42 +145,26 @@ const GlifexLab = (() => {
     return { boundMode: "legacy", declared: cfgDeclared };
   }
 
-  // L3 worker-per-run-of-a-session helper for JS (see jsLabWorker's own
-  // comment above for the reasoning). One JS-side timeout per call --
-  // NOT the same thing as the outer app-level withRuntimeLock timeout
-  // (2 minutes, covers the WHOLE Run/Analyze call): this one is scoped
-  // to a single runOnce() -- one full (mode x size) plan's worth of
-  // cases, not the whole multi-rep analysis -- so a hang gets caught
-  // and reported well before the outer timeout would even notice
-  // something's wrong, and specifically identifies "your code" as the
-  // likely cause rather than a generic stuck-runtime message.
+  // L3 worker-per-run-of-a-session helper for JS (see jsLabWorkerState's
+  // own comment above for the reasoning; goes through window.callWorker,
+  // runtimes.js's shared spawn/message/timeout/cleanup helper). One
+  // JS-side timeout per call -- NOT the same thing as the outer
+  // app-level withRuntimeLock timeout (2 minutes, covers the WHOLE
+  // Run/Analyze call): this one is scoped to a single runOnce() -- one
+  // full (mode x size) plan's worth of cases, not the whole multi-rep
+  // analysis -- so a hang gets caught and reported well before the
+  // outer timeout would even notice something's wrong, and specifically
+  // identifies "your code" as the likely cause rather than a generic
+  // stuck-runtime message.
   const JS_LAB_TIMEOUT_MS = 20000;
   async function runJsInWorker(source, cases) {
-    if (!jsLabWorker) jsLabWorker = new Worker("js-lab-worker.js");
-    const worker = jsLabWorker;
     try {
-      const res = await Promise.race([
-        new Promise((resolve, reject) => {
-          const cleanup = () => { worker.removeEventListener("message", onmsg); worker.removeEventListener("error", onerr); };
-          const onmsg = (e) => { cleanup(); resolve(e.data || {}); };
-          const onerr = (e) => { cleanup(); reject(new Error(String((e && e.message) || e))); };
-          worker.addEventListener("message", onmsg);
-          worker.addEventListener("error", onerr);
-          worker.postMessage({ id: "measure", source, cases });
-        }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Your code took too long to finish (over 20s) -- likely an infinite loop or a much slower algorithm than expected at this input size.")), JS_LAB_TIMEOUT_MS)),
-      ]);
+      const res = await window.callWorker(
+        jsLabWorkerState, "js-lab-worker.js", { id: "measure", source, cases },
+        JS_LAB_TIMEOUT_MS, "Your code took too long to finish (over 20s) -- likely an infinite loop or a much slower algorithm than expected at this input size.");
       if (res.id === "error") return { error: res.error };
       return { results: res.results, nsPerCase: res.nsPerCase };
     } catch (e) {
-      // A genuinely stuck worker (the timeout branch above, or an
-      // uncaught crash) needs a FRESH worker for the next runOnce() --
-      // this one may still be wedged. Terminate and clear so the next
-      // call in this same analyze() lazily spawns a clean one, rather
-      // than reusing something that might still be stuck.
-      worker.terminate();
-      if (jsLabWorker === worker) jsLabWorker = null;
       return { error: String((e && e.message) || e) };
     }
   }
