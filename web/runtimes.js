@@ -446,6 +446,8 @@ const Runtimes = (() => {
     return {
       async run(source, cases, lang) {
         const worker = new Worker("c-worker.js");
+        const spawnedAt = performance.now();
+        console.log(`[glifex-c] spawning worker (cases=${(cases || []).length})`);
         let res;
         try {
           res = await Promise.race([
@@ -460,7 +462,9 @@ const Runtimes = (() => {
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error("C worker timed out after 90s (likely stuck; terminated)")), 90000)),
           ]);
+          console.log(`[glifex-c] worker responded after ${Math.round(performance.now() - spawnedAt)}ms: ${res.id === "error" ? "ERROR -- " + res.error : "ok"}`);
         } catch (e) {
+          console.warn(`[glifex-c] worker did not respond cleanly after ${Math.round(performance.now() - spawnedAt)}ms: ${(e && e.message) || e}`);
           return { error: "C runtime error: " + String((e && e.message) || e) };
         } finally {
           // Always runs, whichever branch of the race above settled --
@@ -470,6 +474,7 @@ const Runtimes = (() => {
           // can't reach in and terminate the worker itself -- this local
           // one, shorter and specific to this call, is what actually
           // cleans it up.)
+          console.log("[glifex-c] terminating worker");
           worker.terminate();
         }
 
