@@ -37,6 +37,37 @@ function showRunning(res, msg) { res.innerHTML = `<div class="running"><span cla
 // connection, and a timeout that fires on a merely-slow-but-working
 // load would be worse than no timeout at all.
 const RUNTIME_TIMEOUT_MS = 120000;
+// The plain Run button used to execute JS directly on the main thread,
+// same as the Lab did before L3 -- a runaway solve() (an accidental
+// infinite loop, or code that's just much slower than the user
+// expected) could freeze the whole tab. Same fix as the Lab's, reusing
+// the same shared window.callWorker helper and the same
+// js-lab-worker.js script (its {id:'measure', source, cases} message
+// protocol already does exactly what runJavaScript(source, cases) did
+// -- compile once, run the cases, return results -- there was no need
+// for a second, near-identical worker file).
+//
+// Persists across separate Run clicks for the whole page session
+// (unlike the Lab's jsLabWorkerState, which is deliberately scoped to
+// one analyze() call and cleaned up in open()'s own finally) -- each
+// Run click is an independent, separate user action, not part of one
+// multi-rep session the way the Lab's repeated measurements are, so
+// there's no natural "end of session" moment to tear this down at;
+// reusing one worker across many Run clicks avoids paying repeated
+// spawn overhead for what's otherwise a very frequent action.
+const jsRunWorkerState = { worker: null };
+const JS_RUN_TIMEOUT_MS = 20000;
+async function runJsViaWorker(source, cases) {
+  try {
+    const res = await window.callWorker(
+      jsRunWorkerState, "js-lab-worker.js", { id: "measure", source, cases },
+      JS_RUN_TIMEOUT_MS, "Your code took too long to finish (over 20s) -- likely an infinite loop or a much slower algorithm than expected on these inputs.");
+    if (res.id === "error") return { error: res.error };
+    return { results: res.results, nsPerCase: res.nsPerCase };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
+}
 function setRuntimeButtonsEnabled(enabled) {
   const runBtn = document.getElementById("run-btn");
   const labBtn = document.getElementById("lab-btn");
@@ -347,7 +378,8 @@ async function runInner() {
 
   // ── algorithm track ─────────────────────────────────────────────────
   if (state.lang === "javascript") {
-    renderResults(GlifexJsRuntime.runJavaScript((window.GlifexEditor ? GlifexEditor.getValue() : document.getElementById("editor").value), p.cases), res);
+    showRunning(res, "Running JavaScript…");
+    renderResults(await runJsViaWorker((window.GlifexEditor ? GlifexEditor.getValue() : document.getElementById("editor").value), p.cases), res);
     return;
   }
   // The C toolchain (Wasmer/WASIX) needs SharedArrayBuffer, which requires the
