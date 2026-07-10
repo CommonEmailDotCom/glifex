@@ -1,7 +1,8 @@
+#define solve __glifex_ref_optimized
 #include "solution.h"
 
 /* O(n) with a tiny open-addressing hash map on the stack. */
-JVal *optimized(JVal *c) {
+JVal *solve(JVal *c) {
     JVal *nums = jget(c, "nums");
     double target = jget(c, "target")->num;
     enum { CAP = 1024 };

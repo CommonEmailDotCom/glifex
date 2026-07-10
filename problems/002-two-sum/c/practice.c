@@ -1,6 +1,6 @@
 #include "solution.h"
 
-JVal *practice(JVal *c) {
+JVal *solve(JVal *c) {
     JVal *nums = jget(c, "nums");
     double target = jget(c, "target")->num;
     for (int i = 0; i < nums->n; i++)
