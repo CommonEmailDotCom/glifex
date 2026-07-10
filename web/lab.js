@@ -338,7 +338,7 @@ const GlifexLab = (() => {
     for (let i = 0; i < plan.length; i++) {
       const vals = repRows.map((rows) => (tierId === "det" ? rows[i].cycles : rows[i].tNs)).filter((v) => v != null && v > 0);
       if (!vals.length) { missing++; continue; }
-      if (vals.length >= 2 && Math.max(...vals) / Math.min(...vals) > SPREAD_LIMIT) { unreliable++; continue; }
+      if (vals.length >= 2 && !E.isReliable(vals, SPREAD_LIMIT)) { unreliable++; continue; }
       modes[plan[i].mode].ns.push(plan[i].n);
       modes[plan[i].mode].ys.push(E.median(vals));
       if (tierId === "det" && repRows[0][i].space != null) spaceBy[plan[i].mode + ":" + plan[i].n] = repRows[0][i].space;
