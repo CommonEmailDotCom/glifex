@@ -221,23 +221,74 @@ const GlifexLab = (() => {
       const w = await runOnce(cases);
       if (w.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(w.error)}</div>`));
     }
-    const repRows = [];
-    let detMeta = null;
-    for (let r = 0; r < reps; r++) {
-      progress(panel, `Running ${plan.length} cases &mdash; ${cfg.modes.length} input famil${cfg.modes.length > 1 ? "ies" : "y"} \u00d7 ${sizes.length} sizes (pass ${r + 1}/${reps})\u2026`);
-      const out = await runOnce(cases);
-      if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
-      if (out.clockHz) detMeta = { clockHz: out.clockHz };
-      // Correctness gate: a wrong solution must never reach the fitter.
+    // Correctness gate: a wrong solution must never reach the fitter.
+    // Shared by the initial rep-collection loop below AND the
+    // rep-replacement pass that follows it -- both need the identical
+    // check applied to whatever came back.
+    function correctnessError(results) {
       for (let i = 0; i < plan.length; i++) {
-        const row = out.results[i];
+        const row = results[i];
         let ok = row && row.ok;
         if (!ok && row && cfg.validate) ok = cfg.validate(plan[i].input, row.got);
         if (!ok) {
-          return void (panel.innerHTML = card(`<div class="lab-verdict bad">&#10007; Cannot analyze: the solution is incorrect on a generated input (family &ldquo;${esc(plan[i].mode)}&rdquo;, n=${plan[i].n})${row && row.error ? " &mdash; " + esc(row.error) : ""}. Growth of a wrong answer means nothing &mdash; fix correctness first.</div>`));
+          return `&#10007; Cannot analyze: the solution is incorrect on a generated input (family &ldquo;${esc(plan[i].mode)}&rdquo;, n=${plan[i].n})${row && row.error ? " &mdash; " + esc(row.error) : ""}. Growth of a wrong answer means nothing &mdash; fix correctness first.`;
         }
       }
+      return null;
+    }
+
+    const repRows = [];
+    const repDurations = [];      // wall time for the WHOLE runOnce() call, one entry per rep
+    let detMeta = null;
+    for (let r = 0; r < reps; r++) {
+      progress(panel, `Running ${plan.length} cases &mdash; ${cfg.modes.length} input famil${cfg.modes.length > 1 ? "ies" : "y"} \u00d7 ${sizes.length} sizes (pass ${r + 1}/${reps})\u2026`);
+      const t0 = performance.now();
+      const out = await runOnce(cases);
+      repDurations.push(performance.now() - t0);
+      if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
+      if (out.clockHz) detMeta = { clockHz: out.clockHz };
+      const cErr = correctnessError(out.results);
+      if (cErr) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${cErr}</div>`));
       repRows.push(out.results);
+    }
+
+    // Rep-level outlier detection + replacement: a WHOLE rep uniformly
+    // slower than its siblings -- sustained contention (a background
+    // compile-heavy test sharing the CI runner, a GC pause spanning many
+    // measurements, etc.) during that rep's ENTIRE pass, not a single
+    // point's brief hiccup -- can't be caught by the existing per-point
+    // SPREAD_LIMIT check below, since EVERY point in that rep would be
+    // systematically higher, not scattered. Confirmed via a real CI
+    // failure showing near-total (29-30 of 30) point disagreement in one
+    // run -- a pattern min-of-N alone (which only protects a single
+    // measurement's own brief window, not sustained contention spanning
+    // an entire rep) wouldn't produce; a whole contaminated rep dragging
+    // every point in it above the OTHER reps' values would.
+    //
+    // 2x the fastest rep's total wall time is the bar: a rep's total
+    // duration aggregates over ALL ~30 points, so it should already run
+    // far less noisy than single-point variance does (SPREAD_LIMIT=3,
+    // per that check's own empirical characterization) -- a whole rep
+    // running 2x+ its fastest sibling is a much stronger signal than any
+    // one point crossing 3x. Bounded to exactly one replacement attempt
+    // per flagged rep (not a retry loop) -- keeps the worst case at
+    // double the normal work, not unbounded, and the existing per-point
+    // check remains as a second layer of defense if a replacement is
+    // ALSO contaminated.
+    const REP_OUTLIER_LIMIT = 2;
+    const minRepDuration = Math.min(...repDurations);
+    for (let r = 0; r < reps; r++) {
+      if (repDurations[r] <= minRepDuration * REP_OUTLIER_LIMIT) continue;
+      progress(panel, `Pass ${r + 1}/${reps} looked contaminated (a whole-pass slowdown, not a single point) &mdash; replacing it\u2026`);
+      const t0 = performance.now();
+      const out = await runOnce(cases);
+      const dt = performance.now() - t0;
+      if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
+      if (out.clockHz) detMeta = { clockHz: out.clockHz };
+      const cErr = correctnessError(out.results);
+      if (cErr) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${cErr}</div>`));
+      repRows[r] = out.results;
+      repDurations[r] = dt;
     }
 
     // Aggregate: median across reps, per (mode, size). A single measurement
