@@ -75,6 +75,29 @@ Live edit-compile-run for every remaining corpus language, in the browser — la
 - [x] **Bx-3. C / C++** -- shipped (caveats tracked). C via clang/WASIX (Wasmer),
       C++ via Binji wasm-clang; green e2e in `c-smoke.spec.js` / `cpp-toolchain.spec.js`.
       See STATUS "C++ runtime (Bx-3b)". *Follow-up: modern-LLVM clang rebuild (Bx-3b-2).*
+      - Known issue (documented in the PR that added this line; not yet
+        fixed): the Wasmer/WASIX C runtime intermittently crashes or
+        fails to compile -- observed as either an uncaught "RuntimeError:
+        unreachable" inside `wasmer_js_bg.wasm`, or a clang/lld linker
+        failure with no apparent cause in the user's own code. Confirmed
+        NOT a cross-call state-leakage bug: a prior fix already isolates
+        every C run into its own fresh Worker with the SDK fully
+        re-initialized (see web/c-worker.js), and the failure still
+        occurs occasionally even so -- other runs and languages are
+        unaffected afterward, and re-running the same attempt often
+        succeeds. Observed correlation, not yet root-caused: not seen on
+        001 (Nth Fibonacci -- scalar, O(1) memory); seen intermittently
+        on 002 (Two Sum -- array/hash-map-based, materially more memory
+        and data movement). Consistent with independently-reported
+        instability in this exact SDK version doing similar in-browser
+        clang/LLVM work elsewhere. Diagnostic breadcrumb logging (stage
+        + source/case-size context, both in the worker and its caller)
+        added to correlate future occurrences against specific inputs
+        rather than guessing from one data point; Wasmer's own
+        `initializeLogger("debug")` is available as a deeper layer if
+        this needs another pass. Deliberately NOT worked around with
+        automatic retry -- would mask the signal needed to actually
+        diagnose it. [Bx-3-wasmer-known-issue]
 - [ ] **Bx-4. Retro trio (6502 / Z80 / SM83)** -- CPU-core-only; OSS cores + GoodASM +
       SingleStepTests vectors run in CI = deterministic, silicon-accurate proof. Smallest,
       most-verifiable, no GC/threads/COI. Front of the line. *High.*
