@@ -83,3 +83,13 @@ self.onmessage = async (e) => {
     self.postMessage({ id: 'error', error: String((err && err.stack) || err), output: out });
   }
 };
+
+self.onerror = (e) => {
+  // Defense in depth: an uncaught error (e.g. a WASM trap escaping
+  // Binji's own error handling) fires here rather than propagating as
+  // a rejected Promise -- without this handler, the caller's
+  // postMessage-based Promise would simply never settle. Mirrors
+  // c-worker.js's own self.onerror for the exact same reasoning.
+  console.error(`[glifex-cpp-worker] UNCAUGHT: ${(e && e.message) || e}`);
+  self.postMessage({ id: 'error', error: `worker crashed (uncaught): ` + String((e && e.message) || e), output: out });
+};

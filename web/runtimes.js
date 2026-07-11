@@ -536,7 +536,6 @@ const Runtimes = (() => {
   // -- C++: vendored Binji wasm-clang (single-process clang-8 + wasm-ld) --
   async function loadCpp() {
     if (!(await vendored("cpp"))) return null;
-    const worker = new Worker("cpp-worker.js");   // drives the committed cpp-shared.js fork
     return {
       async run(source, cases, lang) {
         const L = lang || {};
@@ -544,13 +543,50 @@ const Runtimes = (() => {
         // one translation unit: harness + the user's practice (source) + baked clean/optimized
         const src = [sup["harness.cpp"] || "", source || "", L.clean || "", L.optimized || ""].join("\n");
         const headers = { "solution.hpp": sup["solution.hpp"] || "", "json.hpp": sup["json.hpp"] || "" };
-        const t0 = performance.now();
-        const res = await new Promise((resolve) => {
-          const onmsg = (e) => { worker.removeEventListener("message", onmsg); resolve(e.data || {}); };
-          worker.addEventListener("message", onmsg);
-          worker.postMessage({ id: "run", source: src, headers, cases, variant: "practice" });
-        });
-        const dt = performance.now() - t0;
+        // Fresh worker per call, not reused across the session -- mirrors
+        // loadC()'s own fix for the exact same failure mode (see this
+        // project's git history: a stuck WASM instance inside a reused
+        // worker poisons every subsequent call for the rest of the
+        // session, since the worker is still frozen executing the old
+        // call and can never respond to a new message). C++ carried this
+        // same vulnerability until a hand-rolled hash table with a fixed
+        // capacity could infinite-loop at large n, taking down the
+        // entire C++ runtime, not just that one call, until a hard
+        // refresh -- exactly the originally-reported C symptom, just via
+        // a different trigger.
+        const worker = new Worker("cpp-worker.js");
+        const spawnedAt = performance.now();
+        console.log(`[glifex-cpp] spawning worker (cases=${(cases || []).length})`);
+        let res;
+        try {
+          res = await Promise.race([
+            new Promise((resolve, reject) => {
+              const cleanup = () => { worker.removeEventListener("message", onmsg); worker.removeEventListener("error", onerr); };
+              const onmsg = (e) => { cleanup(); resolve(e.data || {}); };
+              const onerr = (e) => { cleanup(); reject(new Error(String((e && e.message) || e))); };
+              worker.addEventListener("message", onmsg);
+              worker.addEventListener("error", onerr);
+              worker.postMessage({ id: "run", source: src, headers, cases, variant: "practice" });
+            }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("C++ worker timed out after 90s (likely stuck; terminated)")), 90000)),
+          ]);
+          console.log(`[glifex-cpp] worker responded after ${Math.round(performance.now() - spawnedAt)}ms: ${res.id === "error" ? "ERROR -- " + res.error : "ok"}`);
+        } catch (e) {
+          console.warn(`[glifex-cpp] worker did not respond cleanly after ${Math.round(performance.now() - spawnedAt)}ms: ${(e && e.message) || e}`);
+          return { error: "C++ runtime error: " + String((e && e.message) || e) };
+        } finally {
+          // Always runs, whichever branch of the race above settled --
+          // including the local timeout, so a stuck worker can't leak
+          // into (and poison) the next call. (The outer app-level
+          // runtime lock also has its own 2-minute timeout, but that one
+          // only stops WAITING on this call, it can't reach in and
+          // terminate the worker itself -- this local one, shorter and
+          // specific to this call, is what actually cleans it up.)
+          console.log("[glifex-cpp] terminating worker");
+          worker.terminate();
+        }
+        const dt = performance.now() - spawnedAt;
         if (res.id === "error")
           return { error: "C++ compile/runtime error:\n" + String(res.error || "").slice(0, 400) + "\n" + String(res.output || "").trim().slice(0, 600) };
         const out = String(res.output || "");
