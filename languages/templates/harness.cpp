@@ -35,6 +35,11 @@ int main(int argc, char** argv) {
     int passed = 0, n = (int)cases->arr.size();
     for (int i = 0; i < n; i++) {
         auto& c = cases->arr[i];
+        // Diagnostic breadcrumb: flushed immediately, before any work on
+        // this case, so a crash mid-case still leaves a record of
+        // exactly how far processing got. Same reasoning as the C
+        // harness's identical marker.
+        std::cout << "[CASE-BEGIN] case " << i << "\n" << std::flush;
         std::string got = dispatch(*c->obj["input"])->dump();
         if (metrics) {
             // Complexity Lab: per-case cost, adaptively repeated past the

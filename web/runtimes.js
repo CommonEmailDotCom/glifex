@@ -508,7 +508,7 @@ const Runtimes = (() => {
         }
 
         if (res.id === "error")
-          return { error: "C runtime error:\n" + String(res.error || "").slice(0, 400) + (res.output ? "\n" + String(res.output).trim().slice(0, 600) : "") };
+          return { error: "C runtime error:\n" + String(res.error || "").slice(0, 400) + (res.output ? "\n" + String(res.output).trim().slice(-1500) : "") };
 
         const out = String(res.output || "");
         const byI = new Map(), metricByI = new Map();   // L1-c-parse
@@ -518,7 +518,7 @@ const Runtimes = (() => {
           const mm = line.match(/\[METRIC\]\s+case\s+(\d+)\s+ns=(\d+)/);
           if (mm) metricByI.set(Number(mm[1]), Number(mm[2]));
         }
-        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(0, 600) };
+        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(-1500) };
 
         const results = cases.map((c, i) => {
           const r = byI.get(i);
@@ -588,7 +588,7 @@ const Runtimes = (() => {
         }
         const dt = performance.now() - spawnedAt;
         if (res.id === "error")
-          return { error: "C++ compile/runtime error:\n" + String(res.error || "").slice(0, 400) + "\n" + String(res.output || "").trim().slice(0, 600) };
+          return { error: "C++ compile/runtime error:\n" + String(res.error || "").slice(0, 400) + "\n" + String(res.output || "").trim().slice(-1500) };
         const out = String(res.output || "");
         const byI = new Map(), metricByI = new Map();   // L1-cpp-parse
         for (const line of out.split("\n")) {
@@ -597,7 +597,7 @@ const Runtimes = (() => {
           const mm = line.match(/\[METRIC\]\s+case\s+(\d+)\s+ns=(\d+)/);
           if (mm) metricByI.set(Number(mm[1]), Number(mm[2]));
         }
-        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(0, 600) };
+        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(-1500) };
         const results = cases.map((c, i) => {
           const r = byI.get(i);
           if (!r) return { i, ok: false, error: "no result for case", expected: c.expected };
