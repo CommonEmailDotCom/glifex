@@ -30,6 +30,26 @@ const ok = (cond, msg) => { n++; if (!cond) { console.error("FAIL:", msg); proce
   ok(c.closest === "O(n)", "closest is O(n)");
 }
 
+// --- classification: a step going non-positive after bHat correction
+// must not silently corrupt every class's score identically ------------
+// Regression test for a real bug found live: at maxSizes=4 (first=2,
+// only 2 scored steps), a near-flat first (unscored) step can produce a
+// bHat close enough to the second point that it goes slightly negative
+// after correction. The old code pushed a hardcoded -10 for EVERY class
+// on that step (the y1>0&&y2>0 check never depends on the class), which
+// diluted the one remaining scored step's real signal by averaging it
+// with an uninformative constant every class shared -- producing a
+// confident-looking but wrong "closest" that didn't match the raw
+// measured ratios. This exact data (reconstructed from the live
+// verdict) used to report O(1); the true shape is O(n log n).
+{
+  const ns = [64, 128, 256, 512];
+  const Y = 100000;
+  const ys = [Y, Y * 1.00, Y * 1.00 * 2.40, Y * 1.00 * 2.40 * 2.00];
+  const c = classifyGrowth(ns, ys, TIERS.wall.tol);
+  ok(c.closest === "O(n log n)", `a near-flat unscored first step must not corrupt the verdict (got ${c.closest})`);
+}
+
 // --- falsifier, upper direction: quadratic refutes O(n log n) ----------
 {
   const r = mulberry32(7);

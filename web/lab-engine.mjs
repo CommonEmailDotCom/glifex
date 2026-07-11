@@ -116,19 +116,37 @@ export function classifyGrowth(ns, ys, tol) {
   // Pass 2: every class's PURE ratio (no fitting) tested against the SAME
   // bHat-corrected measured data, scored only on the top-half (large-n)
   // steps, matching the original scoring convention.
+  //
+  // A step whose bHat-corrected values go non-positive used to push a
+  // hardcoded -10 for EVERY class identically (the y1>0&&y2>0 check never
+  // depends on the class, only on i/ns/ys/bHat) -- a real bug: that step
+  // contributed ZERO differentiating signal between classes, yet still
+  // diluted whatever real signal the OTHER scored step(s) had by being
+  // averaged in as a fake, uniform, large-magnitude value. Confirmed
+  // directly: with maxSizes=4 (first=2, so only 2 scored steps exist),
+  // a single noisy small-n point produced a bHat large enough to push
+  // one of the two scored steps negative -- reducing real signal to
+  // effectively one step, but the corrupted average still produced a
+  // confident-looking "closest" verdict that didn't match the raw
+  // measured ratios shown in the UI's own proof table. Fixed: skip an
+  // unusable step entirely for that class's average, instead of forcing
+  // in a fake penalty every class shares equally.
   const errs = {};
   for (const c of CLASSES) {
     const stepErrs = [];
     for (let i = 1; i < ns.length; i++) {
       if (i < first) continue;
       const y2 = ys[i] - bHat, y1 = ys[i - 1] - bHat;
+      if (y1 <= 0 || y2 <= 0) continue;   // unusable under this bHat -- skip, don't fake a penalty
       const predPure = c.f(ns[i]) / c.f(ns[i - 1]);
-      // Non-positive corrected values mean this class's shared-b hypothesis
-      // is incompatible with the data at this point -- a clear, large
-      // mismatch rather than an undefined one.
-      stepErrs.push(y1 > 0 && y2 > 0 ? Math.log((y2 / y1) / predPure) : -10);
+      stepErrs.push(Math.log((y2 / y1) / predPure));
     }
-    errs[c.id] = stepErrs.reduce((a, b) => a + b, 0) / stepErrs.length;
+    // Every scored step unusable is rare, and -- since the y1>0&&y2>0 check
+    // never depends on the class -- affects every class identically when it
+    // happens: there's no real signal to work with regardless of what
+    // fallback value is used here, so this exists only to avoid dividing by
+    // zero, not to produce a meaningful comparison.
+    errs[c.id] = stepErrs.length ? stepErrs.reduce((a, b) => a + b, 0) / stepErrs.length : -10;
   }
 
   // Attach the bHat-corrected ratio to each row so the UI's proof table can
