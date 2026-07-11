@@ -195,9 +195,9 @@ const GlifexLab = (() => {
     progress(panel, "Probing runtime tier\u2026");
     const runner = lang === "javascript" ? "js" : await window.Runtimes.get(lang);
     if (!runner) return void (panel.innerHTML = card(`<div class="lab-verdict bad">Runtime for ${esc(lang)} is not available${window.Runtimes.error(lang) ? ": " + esc(window.Runtimes.error(lang)) : ""}.</div>`));
-    const runOnce = async (cases) => runner === "js"
+    const runOnce = async (cases, modeSize) => runner === "js"
       ? await runJsInWorker(source, cases)
-      : await runner.run(source, cases, p.languages[lang]);
+      : await runner.run(source, cases, p.languages[lang], modeSize);
 
     const probePlan = C.buildPlan(cfg, "wall", lang, "probe").plan.slice(0, 1);
     const probe = await runOnce(probePlan.map((c) => mkCase(c, oracle)));
@@ -218,7 +218,7 @@ const GlifexLab = (() => {
     const warm = tierId === "wall" && !(C.LANG_OVERRIDES[lang] && C.LANG_OVERRIDES[lang].reps === 1);
     if (warm) {
       progress(panel, "Warm-up pass (JIT settle; discarded)\u2026");
-      const w = await runOnce(cases);
+      const w = await runOnce(cases, sizes.length);
       if (w.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(w.error)}</div>`));
     }
     // Correctness gate: a wrong solution must never reach the fitter.
@@ -243,7 +243,7 @@ const GlifexLab = (() => {
     for (let r = 0; r < reps; r++) {
       progress(panel, `Running ${plan.length} cases: ${cfg.modes.length} input famil${cfg.modes.length > 1 ? "ies" : "y"} \u00d7 ${sizes.length} sizes (pass ${r + 1}/${reps})\u2026`);
       const t0 = performance.now();
-      const out = await runOnce(cases);
+      const out = await runOnce(cases, sizes.length);
       repDurations.push(performance.now() - t0);
       if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
       if (out.clockHz) detMeta = { clockHz: out.clockHz };
@@ -298,7 +298,7 @@ const GlifexLab = (() => {
       if (replacementBudgetSpent >= REPLACEMENT_BUDGET_MS) break;
       progress(panel, `Pass ${r + 1}/${reps} looked contaminated (a whole-pass slowdown, not a single point) &mdash; replacing it\u2026`);
       const t0 = performance.now();
-      const out = await runOnce(cases);
+      const out = await runOnce(cases, sizes.length);
       const dt = performance.now() - t0;
       replacementBudgetSpent += dt;
       if (out.error) return void (panel.innerHTML = card(`<div class="lab-verdict bad">${esc(out.error)}</div>`));
