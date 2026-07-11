@@ -70,6 +70,8 @@ Live edit-compile-run for every remaining corpus language, in the browser — la
   > run is skipped (blank stubs), and floor-of-four + min-6-cases in `glifex verify` warn
 
   > instead of erroring. Worked examples (001/002) stay strict.
+  > *(Later reverted -- 001/002 are no longer worked examples; see
+  > contribution-policy.md. Worked examples deferred to a future phase.)*
 - [x] **Bx-2. PHP** -- shipped. php-wasm interpreter (drop-in like Python/Ruby);
       in the `LOADERS` registry, green e2e in `runtimes.spec.js`, verified in STATUS.
 - [x] **Bx-3. C / C++** -- shipped (caveats tracked). C via clang/WASIX (Wasmer),
