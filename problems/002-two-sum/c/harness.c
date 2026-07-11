@@ -49,6 +49,13 @@ int main(int argc, char **argv) {
     int passed = 0;
     for (int i = 0; i < cases->n; i++) {
         JVal *in = jget(cases->items[i], "input");
+        /* Diagnostic breadcrumb: flushed immediately, before any work on
+           this case, so a crash mid-case still leaves a record of
+           exactly how far processing got (which case, and by cross-
+           referencing the Lab's ladder, roughly what input size) --
+           the alternative is a crash with no indication of where in a
+           30+-case Analyze run it happened. */
+        printf("[CASE-BEGIN] case %d\n", i); fflush(stdout);
         char *got = jdumps(fn(in));
         if (metrics) {
             /* Complexity Lab: per-case cost, adaptively repeated past the
