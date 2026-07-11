@@ -58,12 +58,20 @@ test.describe("C toolchain (Wasmer WASIX clang)", () => {
     // practice ships as a blank stub (worked_example policy reversal) --
     // fill in the real, shipped `clean` solution so this test proves the
     // toolchain compiles-and-runs a real solution, not that practice
-    // happens to be solved. See runtimes.spec.js's fillWithCleanSolution
-    // for the same pattern, used repeatedly across this suite.
+    // happens to be solved. clean.c carries a leading `#define solve
+    // __glifex_ref_clean` line (renames its own symbol so it can compile
+    // alongside practice.c/optimized.c without a collision) -- MUST be
+    // stripped before using it as literal practice-slot source text, or
+    // the harness's "practice" slot (which the C toolchain always
+    // expects to be the bare, unrenamed `solve`) is left undefined.
+    // Exactly the same transform app.js's own stripCRename() does for
+    // the reference panel's copy button -- see that function's comment
+    // for the prior real bug this exact mistake already caused once
+    // (compareOptimized() missed the strip).
     const source = await page.evaluate(async () => {
       const corpus = await (await fetch("problems.generated.json")).json();
       const p = corpus.problems.find((x) => x.id.indexOf("001") === 0);
-      return p.languages.c.clean;
+      return p.languages.c.clean.replace(/^#define solve __glifex_ref_\w+\n/, "");
     });
     await page.locator("#editor").fill(source);
     await page.locator("#run-btn").click();

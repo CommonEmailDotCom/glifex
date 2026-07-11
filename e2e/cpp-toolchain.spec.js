@@ -65,12 +65,18 @@ test.describe("C++ runtime (Binji wasm-clang)", () => {
     await page.locator("#problem-list li").first().click();
     await page.locator("#lang-select").selectOption("cpp");
     // practice ships as a blank stub (worked_example policy reversal) --
-    // fill in the real, shipped `clean` solution, same reasoning as the
-    // direct-driver test above and runtimes.spec.js's fillWithCleanSolution.
+    // fill in the real, shipped `clean` solution. web/runtimes.js's
+    // loadCpp() always sends variant: "practice" to the worker
+    // regardless of editor content (see its own source) -- the C++
+    // harness dispatches by literal function name, so the function
+    // must actually be named `practice`, not `clean`, for the UI's Run
+    // button to find it. Rename it here, same idea as the direct-driver
+    // test above (which sidesteps this by controlling `variant`
+    // directly instead), just via the UI's own, fixed dispatch path.
     const source = await page.evaluate(async () => {
       const corpus = await (await fetch("problems.generated.json")).json();
       const p = corpus.problems.find((x) => x.id.indexOf("001") === 0);
-      return p.languages.cpp.clean;
+      return p.languages.cpp.clean.replace(/\bValue clean\(/, "Value practice(");
     });
     await page.locator("#editor").fill(source);
     await page.locator("#run-btn").click();
