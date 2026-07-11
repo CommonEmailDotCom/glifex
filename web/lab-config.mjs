@@ -70,7 +70,19 @@ export const LANG_OVERRIDES = {
   // step: 4 (up to n=512), between the confirmed-safe 3 and
   // confirmed-unsafe 5. Not the shipped value -- revert to 10 once
   // this experiment concludes.
-  c: { reps: 1, maxSizes: 4 },
+  // TEMPORARY DIAGNOSTIC: reps bumped from 1 to 10. Not for
+  // measurement quality -- that's not why reps stayed at 1 for C (see
+  // the comment above): the harness already self-stabilizes per case
+  // internally, so lab-level reps were never needed for that. This is
+  // a stress test instead: lab.js bails out and reports the error on
+  // the FIRST failing rep, not after collecting all of them -- so
+  // reps=10 means each Analyze click is 10 independent compile+run
+  // attempts at the current maxSizes, stopping at the first failure.
+  // That compounds the odds of surfacing a low-but-nonzero failure
+  // rate that a handful of manual single-shot clicks could miss by
+  // chance. Not the shipped value -- revert to 1 once this experiment
+  // concludes.
+  c: { reps: 10, maxSizes: 4 },
   cpp: { reps: 1, maxSizes: 10 },
   php: { maxSizes: 4 },
 };
