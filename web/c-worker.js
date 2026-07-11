@@ -87,6 +87,7 @@
  * disproportionately inflate small case counts).
  */
 let stage = "not started";   // worker-global (not local to onmessage) so onerror can report it too
+let out = "";   // worker-global too, same reasoning -- see self.onerror below
 
 // Recognizes one specific, common, and previously-cryptic failure: the
 // harness always compiles practice.c + clean.c + optimized.c together as
@@ -141,7 +142,7 @@ self.onmessage = async (e) => {
   const ctx = `practice.c=${srcSize}b all-sources=${totalSrcSize}b cases=${caseCount}`;
   console.log(`[glifex-c-worker] starting -- ${ctx}`);
 
-  let out = "";
+  out = "";   // reset for this call (module-level so self.onerror can read it too)
   try {
     stage = "importing SDK";
     const { init, Wasmer, Directory } = await import("./vendor/c/index.mjs");
@@ -189,14 +190,31 @@ self.onmessage = async (e) => {
     const prog = await Wasmer.fromFile(wasm);
     stage = "executing";
     console.log(`[glifex-c-worker] ${stage} -- ${ctx} out.wasm=${wasm.byteLength}b`);
-    const rres = await (await prog.entrypoint.run({
+    const runInst = await prog.entrypoint.run({
       args: ["practice", "--metrics"], mount: { [MP]: dir }, cwd: MP + "/c",   // L1-c-args
-    })).wait();
+    });
+    // Pipe stdout into `out` as it's produced, not only once .wait()
+    // resolves -- confirmed a real, supported pattern (not just
+    // theorized): Wasmer's own official examples pipe Instance.stdout
+    // this exact way (e.g. their wasmer.sh in-browser terminal,
+    // github.com/wasmerio/wasmer-js/.../examples/wasmer.sh/index.ts).
+    // If the trap is severe enough to escape even this try/catch
+    // (landing in self.onerror below instead -- see its own comment),
+    // `out` still has whatever was written before the crash, instead
+    // of self.onerror's previous hardcoded empty output. .catch(()=>{})
+    // here: if the pipe itself errors for some unrelated reason, `out`
+    // still keeps whatever arrived before that -- a logging path
+    // failing shouldn't crash the actual run.
+    const decoder = new TextDecoder();
+    const pipeDone = runInst.stdout.pipeTo(new WritableStream({
+      write(chunk) { out += decoder.decode(chunk, { stream: true }); },
+    })).catch(() => {});
+    await runInst.wait();
+    await pipeDone;   // make sure every already-produced chunk actually reached `out` before we read it
     const dt = performance.now() - t0;
     stage = "done";
     console.log(`[glifex-c-worker] ${stage} -- ${ctx} dt=${Math.round(dt)}ms`);
 
-    out = String(rres.stdout || "");
     self.postMessage({ id: "result", output: out, dt });
   } catch (err) {
     console.error(`[glifex-c-worker] CRASHED at stage "${stage}" -- ${ctx} -- ${(err && err.stack) || err}`);
@@ -217,7 +235,12 @@ self.onerror = (e) => {
   // occurrence caught HERE -- meaning it escaped even the try/catch
   // above, i.e. likely came from Wasmer's own internal async/worker
   // machinery rather than directly from the awaited call -- still says
-  // roughly where in the sequence it happened.
+  // roughly where in the sequence it happened. `out` (also module-
+  // global) is included too: it's populated incrementally via a
+  // stdout pipe started before .wait() is ever called (see onmessage
+  // above), so even a crash severe enough to land HERE still carries
+  // whatever the harness managed to print -- e.g. its last
+  // "[CASE-BEGIN] case N" breadcrumb -- instead of nothing at all.
   console.error(`[glifex-c-worker] UNCAUGHT at stage "${stage}": ${(e && e.message) || e}`);
-  self.postMessage({ id: "error", error: `worker crashed (uncaught) at stage "${stage}": ` + String((e && e.message) || e), output: "" });
+  self.postMessage({ id: "error", error: `worker crashed (uncaught) at stage "${stage}": ` + String((e && e.message) || e), output: out });
 };
