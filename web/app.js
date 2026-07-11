@@ -36,7 +36,18 @@ function showRunning(res, msg) { res.innerHTML = `<div class="running"><span cla
 // ~100MB toolchain, which can legitimately take a while on a slow
 // connection, and a timeout that fires on a merely-slow-but-working
 // load would be worse than no timeout at all.
-const RUNTIME_TIMEOUT_MS = 120000;
+//
+// Raised well past the original 120s for C's current diagnostic
+// config: reps=10 combined with retryOnError=2 means up to 10 reps x
+// up to 3 attempts each (the original attempt plus up to 2 retries) =
+// up to 30 total compile+run attempts in a single Analyze click, each
+// a fully fresh worker. At ~15-20s per attempt (measured), even the
+// EXPECTED case (not worst case) already approaches 250s, so 240
+// would still be too tight -- this needs real headroom above the
+// worst-case math (~600s at 20s/attempt), not just double the
+// original. Not the shipped value -- revert once these C diagnostics
+// conclude.
+const RUNTIME_TIMEOUT_MS = 600000;
 // The plain Run button used to execute JS directly on the main thread,
 // same as the Lab did before L3 -- a runaway solve() (an accidental
 // infinite loop, or code that's just much slower than the user

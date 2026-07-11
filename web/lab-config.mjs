@@ -63,23 +63,16 @@ export const TIERS = {
 // outer runtime-lock timeout (app.js's RUNTIME_TIMEOUT_MS), which wraps
 // the whole Analyze call. Re-measure if the ladder grows further.
 export const LANG_OVERRIDES = {
-  // TEMPORARY DIAGNOSTIC: bisecting C's Analyze maxSizes. Confirmed so
-  // far, directly measured: 3 (up to n=256) -- 0% failures across many
-  // attempts. 5 (up to n=1024, the original pre-extension ladder) --
-  // intermittent failures. 6 (up to n=2048) -- 50-70% failures. This
-  // step: 4 (up to n=512), between the confirmed-safe 3 and
-  // confirmed-unsafe 5. Not the shipped value -- revert to 10 once
-  // this experiment concludes.
-  // retryOnError: retry a rep, up to N times, on a runtime error before
-  // giving up -- specifically for C/C++'s known-flaky Wasmer SDK
-  // (see docs/ROADMAP.md's Bx-3 entry). Each retry gets a fully fresh
-  // worker (loadC/loadCpp spawn a new one per call), not a shared
-  // instance -- unlike the chunking approach tried and found to make
-  // things WORSE, this doesn't reuse a Directory across multiple
-  // Wasmer.fromFile() calls within one call. Retries are surfaced in
-  // the output, never silent -- an empirical falsifier shouldn't hide
-  // that a result took retries to get.
-  c: { reps: 1, maxSizes: 4, retryOnError: 2 },
+  // TEMPORARY DIAGNOSTIC, combined: reps=10 (stress test -- 10
+  // independent compile+run attempts per Analyze click) paired with
+  // retryOnError=2 (each rep gets up to 2 retries, fresh worker each
+  // time, before giving up) -- these are meant to work TOGETHER: retry
+  // is what makes reps=10 survivable at all, rather than the whole
+  // Analyze attempt dying on the very first crash before completing
+  // even one rep. maxSizes stays at 4 (up to n=512), the current
+  // bisection point. Not the shipped values -- revert once this
+  // experiment concludes.
+  c: { reps: 10, maxSizes: 4, retryOnError: 2 },
   cpp: { reps: 1, maxSizes: 10 },
   php: { maxSizes: 4 },
 };
