@@ -94,11 +94,64 @@ async function getWabt() {
   return wabt;
 }
 
-// compile() copied+adapted verbatim from runtimes.js's loadWat(),
-// same logic, same two calling conventions (pure scalar vs
-// memory-marshaled array args) -- see that file's own comments for
-// the fuller explanation of why each exists.
-async function compile(source) {
+// Host-provided (imported) memory: solutions no longer declare their own
+// fixed (memory (export "memory") N) -- they import memory instead
+// ((import "env" "memory" (memory 0))), and the harness sizes + creates
+// it here, based on the actual cases about to run, before instantiating.
+// This is what actually removes the Lab-specific "how big could n ever
+// get" assumption from the solution files themselves: a solution now
+// just solves the problem for whatever n it's handed, with no embedded
+// guess about how large that might be, and sizing becomes purely this
+// harness's job -- which is where it belongs, since this is the thing
+// that actually knows what's about to run (Run's few small fixed cases
+// vs Analyze's full ladder up to n=32768).
+//
+// tableCapacity(n) mirrors, exactly, the SAME power-of-2 growth a
+// solution using an open-addressing hash table computes for itself at
+// the start of solve() (start at 16, double while below 2n) -- so this
+// sizing is precise, not just "generously large enough": a solution
+// with such a table will compute this exact same number internally,
+// independent of this file.
+function tableCapacity(n) {
+  let cap = 16;
+  const need = n * 2;
+  while (cap < need) cap *= 2;
+  return cap;
+}
+
+// Longest array-valued input across every case about to run. Problem-
+// agnostic on purpose (matches this file's existing design -- it
+// doesn't know anything about any specific problem): whatever the
+// largest array argument turns out to be, across any problem's cases,
+// is what memory needs to be sized for.
+function maxArrayLen(cases) {
+  let max = 0;
+  for (const c of cases) {
+    for (const v of Object.values((c && c.input) || {})) {
+      if (Array.isArray(v) && v.length > max) max = v.length;
+    }
+  }
+  return max;
+}
+
+// Sized for the worst case across every marshaling shape a solution
+// might use: the input array itself, plus enough room for a
+// tableCapacity(maxN)-slot hash table at up to 12 bytes/slot (the
+// largest per-slot size any current solution uses) -- covers a
+// solution using a smaller per-slot layout, or no table at all, too.
+// Real headroom (+1 page) above the computed minimum, not an exact
+// fit.
+function requiredPages(maxN) {
+  const cap = tableCapacity(maxN);
+  const inputBytes = maxN * 4;
+  const tableBytes = cap * 12;
+  const totalBytes = inputBytes + tableBytes + 8; // + a few bytes of alignment-padding safety
+  return Math.max(1, Math.ceil(totalBytes / 65536) + 1);
+}
+
+// compile() adapted from runtimes.js's original loadWat() (see git
+// history for that earlier shape, before host-provided memory).
+async function compile(source, cases) {
   const w = await getWabt();
   let binary;
   try {
@@ -110,34 +163,33 @@ async function compile(source) {
   } catch (e) {
     return { error: "WAT assembly error: " + String(e.message || e) };
   }
+  const pages = requiredPages(maxArrayLen(cases || []));
+  const memory = new WebAssembly.Memory({ initial: pages });
   let solve, instance;
   try {
-    instance = new WebAssembly.Instance(new WebAssembly.Module(binary), {});
+    instance = new WebAssembly.Instance(new WebAssembly.Module(binary), { env: { memory } });
     solve = instance.exports.solve;
   } catch (e) {
     return { error: "WASM instantiate error: " + String(e.message || e) };
   }
   if (typeof solve !== "function") return { error: 'no "solve" export (numbers in, number out)' };
-  const memory = instance.exports.memory;
   const callSolve = (input) => {
     const values = Object.values(input);
     let args = values;
-    if (memory) {
-      let offset = 0, usedMemory = false;
-      const marshaled = [];
-      for (const v of values) {
-        if (Array.isArray(v)) {
-          usedMemory = true;
-          const view = new Int32Array(memory.buffer, offset, v.length);
-          view.set(v);
-          marshaled.push(offset, v.length);
-          offset += v.length * 4;
-        } else {
-          marshaled.push(v);
-        }
+    let offset = 0, usedMemory = false;
+    const marshaled = [];
+    for (const v of values) {
+      if (Array.isArray(v)) {
+        usedMemory = true;
+        const view = new Int32Array(memory.buffer, offset, v.length);
+        view.set(v);
+        marshaled.push(offset, v.length);
+        offset += v.length * 4;
+      } else {
+        marshaled.push(v);
       }
-      if (usedMemory) args = marshaled;
     }
+    if (usedMemory) args = marshaled;
     return solve(...args);
   };
   return { measure: (cases, opts) => caseLoop(callSolve, cases, opts) };
@@ -147,7 +199,7 @@ self.onmessage = async (e) => {
   const d = e.data || {};
   if (d.id !== "run") return;
   try {
-    const c = await compile(d.source);
+    const c = await compile(d.source, d.cases);
     if (c.error) { self.postMessage({ id: "error", error: c.error }); return; }
     const out = c.measure(d.cases);
     self.postMessage({ id: "result", ...out });
