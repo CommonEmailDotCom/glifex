@@ -66,6 +66,20 @@ self.onmessage = async (e) => {
     const output = await compileLinkRun(d.source, d.headers, d.cases, d.variant);
     self.postMessage({ id: 'result', output });
   } catch (err) {
+    // Binji's App.run() rejects on ANY non-zero process exit -- but the
+    // harness's own convention is exit 1 for "some cases failed" (a
+    // normal, expected outcome users need to see as pass/fail results,
+    // not a scary error banner) and exit 0 for "all passed". A genuine
+    // crash (compile error, trap) can never reach this point having
+    // already printed a complete "<passed>/<n> passed" line -- the
+    // harness prints that immediately before its own return statement,
+    // so its presence reliably means the program ran to completion and
+    // simply had failing cases. Only treat this as a real error when
+    // that summary line never appeared.
+    if (/^\d+\/\d+ passed$/m.test(out)) {
+      self.postMessage({ id: 'result', output: out });
+      return;
+    }
     self.postMessage({ id: 'error', error: String((err && err.stack) || err), output: out });
   }
 };

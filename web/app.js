@@ -235,6 +235,19 @@ function showReference(variant) {
   // into practice.c would rename the user's OWN "solve" function too,
   // reintroducing exactly the bug this whole change fixes.
   if (state.lang === "c") src = stripCRename(src);
+  // C++'s equivalent problem: loadCpp() (runtimes.js) always dispatches
+  // variant "practice" to the compiled binary regardless of editor
+  // content, looking for a function literally named "practice" -- C
+  // has no such issue (its variants share the bare "solve" name, only
+  // renamed via #define, which stripCRename() above already strips).
+  // Without this, copying a revealed clean/optimized/brute-force
+  // solution into practice's editor -- the natural way to check a
+  // reference actually works -- fails to compile/link, with nothing
+  // wrong with the algorithm itself.
+  if (state.lang === "cpp" && variant && variant !== "practice") {
+    const fnName = variant === "brute-force" ? "bruteforce" : variant;
+    src = src.replace(new RegExp(`\\bValue\\s+${fnName}\\s*\\(`), "Value practice(");
+  }
   $("#reference-code").value = src;
   $("#ref-brute-force").classList.toggle("active", variant === "brute-force");
   $("#ref-clean").classList.toggle("active", variant === "clean");
