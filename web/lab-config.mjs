@@ -63,13 +63,12 @@ export const TIERS = {
 // outer runtime-lock timeout (app.js's RUNTIME_TIMEOUT_MS), which wraps
 // the whole Analyze call. Re-measure if the ladder grows further.
 export const LANG_OVERRIDES = {
-  // TEMPORARY DIAGNOSTIC: capped from 10 to 3 (sizes up to 256, not
-  // 32768) to test whether Analyze avoids the intermittent
-  // "unreachable" crash entirely when it never processes anything
-  // larger than what Run has always safely handled (Run's own fixed
-  // test cases top out at ~13 elements). Not the shipped value --
-  // revert to 10 once this experiment has an answer either way.
-  c: { reps: 1, maxSizes: 3 },
+  // TEMPORARY DIAGNOSTIC: bisecting up from a confirmed-safe maxSizes=3
+  // (up to n=256, ran crash-free across many attempts) toward the
+  // original 10 (up to n=32768). This step: 6 (up to n=2048), halfway
+  // between 3 and 10, narrowing down where instability starts. Not
+  // the shipped value -- revert to 10 once this experiment concludes.
+  c: { reps: 1, maxSizes: 6 },
   cpp: { reps: 1, maxSizes: 10 },
   php: { maxSizes: 4 },
 };
