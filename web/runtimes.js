@@ -473,7 +473,7 @@ const Runtimes = (() => {
   async function loadC() {
     if (!(await vendored("c"))) return null;
     return {
-      async run(source, cases, lang) {
+      async run(source, cases, lang, modeSize) {
         const worker = new Worker("c-worker.js");
         const spawnedAt = performance.now();
         console.log(`[glifex-c] spawning worker (cases=${(cases || []).length})`);
@@ -486,7 +486,7 @@ const Runtimes = (() => {
               const onerr = (e) => { cleanup(); reject(new Error(String((e && e.message) || e))); };
               worker.addEventListener("message", onmsg);
               worker.addEventListener("error", onerr);
-              worker.postMessage({ id: "run", source, cases, lang });
+              worker.postMessage({ id: "run", source, cases, lang, modeSize });
             }),
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error("C worker timed out after 90s (likely stuck; terminated)")), 90000)),
@@ -508,7 +508,7 @@ const Runtimes = (() => {
         }
 
         if (res.id === "error")
-          return { error: "C runtime error:\n" + String(res.error || "").slice(0, 400) + (res.output ? "\n" + String(res.output).trim().slice(-1500) : "") };
+          return { error: "C runtime error:\n" + String(res.error || "").slice(0, 400) + (res.output ? "\n" + String(res.output).trim().slice(0, 600) : "") };
 
         const out = String(res.output || "");
         const byI = new Map(), metricByI = new Map();   // L1-c-parse
@@ -518,7 +518,7 @@ const Runtimes = (() => {
           const mm = line.match(/\[METRIC\]\s+case\s+(\d+)\s+ns=(\d+)/);
           if (mm) metricByI.set(Number(mm[1]), Number(mm[2]));
         }
-        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(-1500) };
+        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(0, 600) };
 
         const results = cases.map((c, i) => {
           const r = byI.get(i);
@@ -588,7 +588,7 @@ const Runtimes = (() => {
         }
         const dt = performance.now() - spawnedAt;
         if (res.id === "error")
-          return { error: "C++ compile/runtime error:\n" + String(res.error || "").slice(0, 400) + "\n" + String(res.output || "").trim().slice(-1500) };
+          return { error: "C++ compile/runtime error:\n" + String(res.error || "").slice(0, 400) + "\n" + String(res.output || "").trim().slice(0, 600) };
         const out = String(res.output || "");
         const byI = new Map(), metricByI = new Map();   // L1-cpp-parse
         for (const line of out.split("\n")) {
@@ -597,7 +597,7 @@ const Runtimes = (() => {
           const mm = line.match(/\[METRIC\]\s+case\s+(\d+)\s+ns=(\d+)/);
           if (mm) metricByI.set(Number(mm[1]), Number(mm[2]));
         }
-        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(-1500) };
+        if (byI.size === 0) return { error: "no case results from harness:\n" + out.trim().slice(0, 600) };
         const results = cases.map((c, i) => {
           const r = byI.get(i);
           if (!r) return { i, ok: false, error: "no result for case", expected: c.expected };
