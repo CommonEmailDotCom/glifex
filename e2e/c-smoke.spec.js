@@ -55,6 +55,17 @@ test.describe("C toolchain (Wasmer WASIX clang)", () => {
     await expect(page.locator("#problem-list li").first()).toBeVisible();
     await page.locator('#problem-list li:has-text("Anagram")').click();
     await page.locator("#lang-select").selectOption("c");
+    // practice ships as a blank stub (worked_example policy reversal) --
+    // fill in the real, shipped `clean` solution so this test proves the
+    // toolchain compiles-and-runs a real solution, not that practice
+    // happens to be solved. See runtimes.spec.js's fillWithCleanSolution
+    // for the same pattern, used repeatedly across this suite.
+    const source = await page.evaluate(async () => {
+      const corpus = await (await fetch("problems.generated.json")).json();
+      const p = corpus.problems.find((x) => x.id.indexOf("001") === 0);
+      return p.languages.c.clean;
+    });
+    await page.locator("#editor").fill(source);
     await page.locator("#run-btn").click();
     const summary = page.locator("#results .summary");
     await expect(summary).toBeVisible({ timeout: 240_000 });   // compiled + ran the harness
