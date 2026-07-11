@@ -37,37 +37,6 @@ function showRunning(res, msg) { res.innerHTML = `<div class="running"><span cla
 // connection, and a timeout that fires on a merely-slow-but-working
 // load would be worse than no timeout at all.
 const RUNTIME_TIMEOUT_MS = 120000;
-// The plain Run button used to execute JS directly on the main thread,
-// same as the Lab did before L3 -- a runaway solve() (an accidental
-// infinite loop, or code that's just much slower than the user
-// expected) could freeze the whole tab. Same fix as the Lab's, reusing
-// the same shared window.callWorker helper and the same
-// js-lab-worker.js script (its {id:'measure', source, cases} message
-// protocol already does exactly what runJavaScript(source, cases) did
-// -- compile once, run the cases, return results -- there was no need
-// for a second, near-identical worker file).
-//
-// Persists across separate Run clicks for the whole page session
-// (unlike the Lab's jsLabWorkerState, which is deliberately scoped to
-// one analyze() call and cleaned up in open()'s own finally) -- each
-// Run click is an independent, separate user action, not part of one
-// multi-rep session the way the Lab's repeated measurements are, so
-// there's no natural "end of session" moment to tear this down at;
-// reusing one worker across many Run clicks avoids paying repeated
-// spawn overhead for what's otherwise a very frequent action.
-const jsRunWorkerState = { worker: null };
-const JS_RUN_TIMEOUT_MS = 20000;
-async function runJsViaWorker(source, cases) {
-  try {
-    const res = await window.callWorker(
-      jsRunWorkerState, "js-lab-worker.js", { id: "measure", source, cases },
-      JS_RUN_TIMEOUT_MS, "Your code took too long to finish (over 20s) -- likely an infinite loop or a much slower algorithm than expected on these inputs.");
-    if (res.id === "error") return { error: res.error };
-    return { results: res.results, nsPerCase: res.nsPerCase };
-  } catch (e) {
-    return { error: String((e && e.message) || e) };
-  }
-}
 function setRuntimeButtonsEnabled(enabled) {
   const runBtn = document.getElementById("run-btn");
   const labBtn = document.getElementById("lab-btn");
@@ -201,40 +170,23 @@ function syncReference() {
   if (!panel.hidden) showReference(state.refVariant || "optimized");
 }
 
-// C-specific: clean.c/optimized.c carry a leading `#define solve
-// __glifex_ref_<variant>` line that renames their own symbol at compile
-// time. Baked into the FILE itself (not applied as a separate
-// pre-processing step) because both compile paths need it: the CLI's
-// test_cmd is a plain `gcc ... *.c` glob with no pre-processing stage,
-// and the browser's c-worker.js writes this same file content directly
-// too -- there's no single shared place to inject the rename at
-// runtime for both.
-//
-// Every caller that uses L.clean/L.optimized as literal SOURCE TEXT
-// (not just as the file c-worker.js writes to /c/clean.c or
-// /c/optimized.c, where the rename is supposed to stay) needs this
-// stripped first -- not just the reference panel's display. Missing
-// that once already caused a real bug: compareOptimized() below reads
-// the same raw L.optimized and passes it as the PRACTICE slot's source
-// to test the reference solution's own performance -- with the rename
-// directive still attached, that source and c-worker.js's own
-// /c/optimized.c write would BOTH rename their "solve" to the same
-// target, reintroducing a fresh collision instead of the one this was
-// meant to fix. One shared function so future call sites don't have to
-// remember this on their own.
-function stripCRename(src) {
-  return String(src || "").replace(/^#define solve __glifex_ref_\w+\n/, "");
-}
-
 function showReference(variant) {
   state.refVariant = variant;
   let src = currentSource(variant) || "(no reference for this variant)";
-  // Display-only: the user should see clean, readable "solve"-named
+  // C-specific: clean.c/optimized.c carry a leading `#define solve
+  // __glifex_ref_<variant>` line that renames their own symbol at
+  // compile time. Baked into the FILE itself (not applied as a
+  // separate pre-processing step) because both compile paths need it:
+  // the CLI's test_cmd is a plain `gcc ... *.c` glob with no
+  // pre-processing stage, and the browser's c-worker.js writes this
+  // same file content directly too -- there's no single shared place
+  // to inject the rename at runtime for both. Stripped here,
+  // display-only: the user should see clean, readable "solve"-named
   // code, and critically, copying that displayed text must NOT also
   // copy the rename directive -- if it did, pasting the copied code
   // into practice.c would rename the user's OWN "solve" function too,
   // reintroducing exactly the bug this whole change fixes.
-  if (state.lang === "c") src = stripCRename(src);
+  if (state.lang === "c") src = src.replace(/^#define solve __glifex_ref_\w+\n/, "");
   $("#reference-code").value = src;
   $("#ref-brute-force").classList.toggle("active", variant === "brute-force");
   $("#ref-clean").classList.toggle("active", variant === "clean");
@@ -287,14 +239,8 @@ function renderResults(out, res, opts = {}) {
 
 async function compareOptimized(userOut, res) {
   const p = state.current;
-  let src = (p.languages[state.lang] || {}).optimized;
+  const src = (p.languages[state.lang] || {}).optimized;
   if (!src) return;
-  // Same C-specific strip as showReference() (see stripCRename's own
-  // comment) -- src here becomes the PRACTICE slot's source text, not
-  // just display text, so leaving the rename directive attached would
-  // rename ITS "solve" to the same target c-worker.js's own
-  // /c/optimized.c write already uses, colliding with itself.
-  if (state.lang === "c") src = stripCRename(src);
   let refOut;
   if (state.lang === "javascript") refOut = GlifexJsRuntime.runJavaScript(src, p.cases);
   else {
@@ -378,8 +324,7 @@ async function runInner() {
 
   // ── algorithm track ─────────────────────────────────────────────────
   if (state.lang === "javascript") {
-    showRunning(res, "Running JavaScript…");
-    renderResults(await runJsViaWorker((window.GlifexEditor ? GlifexEditor.getValue() : document.getElementById("editor").value), p.cases), res);
+    renderResults(GlifexJsRuntime.runJavaScript((window.GlifexEditor ? GlifexEditor.getValue() : document.getElementById("editor").value), p.cases), res);
     return;
   }
   // The C toolchain (Wasmer/WASIX) needs SharedArrayBuffer, which requires the
