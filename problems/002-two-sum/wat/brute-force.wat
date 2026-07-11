@@ -3,8 +3,18 @@
 ;; every j > i checking nums[i] + nums[j] == target. Contract (host
 ;; marshals JSON):
 ;;   solve(ptr: i32, len: i32, target: f64) -> (i32, i32)   ;; [i, j], or [-1, -1] if not found
+;;
+;; Memory is imported, not declared here: the host (web/wat-worker.js)
+;; sizes it based on the actual cases about to run. No hash table here,
+;; so no capacity concern beyond the input array itself -- but a fixed
+;; declared size here would still carry the same embedded "how big
+;; could n get" assumption every other solution in this problem used to
+;; have (and that assumption was the actual root cause the last time
+;; this broke), so this stays consistent with clean.wat/optimized.wat's
+;; approach even though this file itself has nothing more complex to
+;; get right.
 (module
-  (memory (export "memory") 1)
+  (import "env" "memory" (memory 0))
   (func (export "solve") (param $ptr i32) (param $len i32) (param $target f64) (result i32 i32)
     (local $i i32) (local $j i32) (local $a i32) (local $b i32)
     (local.set $i (i32.const 0))
